@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Trình khởi động (RUN-Mac.command, RUN-Windows.bat): tự tìm Python 3.10 trở lên, cài thư viện đúng cách, báo lỗi rõ ràng thay vì báo "Xong!" khi cài thất bại.
+
 ### Added
 - Giao diện 4 khu vực đầy đủ: video gốc + xem trước (có tua), chọn đoạn + timeline kéo thả hiệu ứng, source/audio/text (vẽ vùng text trên khung hình, kiểu chữ), đặt tên + xem trước + tiến độ + bảng kết quả.
 - Lõi: thay đoạn Intro/Tuỳ chọn/Outro; source dài thì cắt, source ngắn thì co đoạn hoặc bỏ qua (áp cho cả lô); audio thay thế xuyên suốt (cắt đuôi / đệm im lặng); hiệu ứng crossfade, fade đen/trắng, slide, wipe tại từng mối nối; thay text đa ngôn ngữ (inpaint OpenCV + vẽ Pillow, font Fira Sans đi kèm có dấu tiếng Việt).
