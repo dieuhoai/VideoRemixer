@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="vi" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Video Bulk Remixer</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <script src="/static/js/app.js"></script>
+</head>
+<body>
+<div class="shell" x-data="app()" x-init="init()" x-cloak>
+  <header class="topbar">
+    <h1 class="brand">🎬 Video Bulk Remixer</h1>
+    <button class="btn btn-ghost" type="button" @click="toggleTheme()"
+            :aria-label="theme === 'dark' ? 'Chuyển sang nền sáng' : 'Chuyển sang nền tối'"
+            x-text="theme === 'dark' ? '☀ Sáng' : '☾ Tối'"></button>
+  </header>
+  <p class="toast" role="status" aria-live="polite" x-show="message" x-text="message" @click="message = ''"></p>
+
+  <main class="grid">
+
+    <!-- ① VIDEO GỐC -->
+    <section class="card area-a" aria-labelledby="h-a">
+      <h2 id="h-a"><span class="num">1</span> Video gốc</h2>
+      <p class="hint">Chọn thư mục chứa các video cần xử lý. Bấm vào video để xem trước.</p>
+      <div class="row">
+        <input class="input flex-1" aria-label="Đường dẫn thư mục video gốc" x-model.trim="form.input_dir"
+               placeholder="Dán đường dẫn hoặc bấm Chọn thư mục">
+        <button class="btn" type="button" @click="pick('input_dir')" title="Mở hộp chọn thư mục">Chọn thư mục…</button>
+      </div>
+      <p class="error" role="alert" x-show="scanError" x-text="scanError"></p>
+      <div class="file-list" x-show="videos.length > 0" role="list">
+        <p class="count">Tìm thấy <strong x-text="videos.length"></strong> video</p>
+        <template x-for="v in videos" :key="v.path">
+          <button type="button" class="file-item" role="listitem"
+                  :class="{ active: preview && preview.path === v.path, bad: !v.duration }"
+                  @click="openPreview(v)" :title="v.error || v.name">
+            <img class="thumb" loading="lazy" alt="" :src="thumbUrl(v)" width="64" height="36">
+            <span class="file-name" x-text="v.name"></span>
+            <span class="file-meta" x-text="v.duration ? (v.duration + 's · ' + v.resolution) : 'Không đọc được'"></span>
+          </button>
+        </template>
+      </div>
+      <div class="empty-state" x-show="form.input_dir && !scanError && videos.length === 0">
+        <p>Chưa có video nào trong thư mục này.</p>
+      </div>
+
+      <div class="preview" x-show="preview">
+        <p class="preview-title" x-text="'Xem trước: ' + (preview ? preview.name : '')"></p>
+        <video id="player" controls preload="metadata" class="player" aria-label="Xem trước video gốc"
+               @timeupdate="now = $el.currentTime" @loadedmetadata="now = 0"></video>
+        <div class="row-sm">
+          <span class="file-meta" aria-live="polite">Đang ở giây: <strong x-text="now.toFixed(1)"></strong></span>
+          <button class="btn btn-sm" type="button" @click="setFocusedFromNow()">Lấy giây này →</button>
+        </div>
+        <p class="hint">Chọn ô giây ở ② (ví dụ "Intro đến giây") rồi bấm "Lấy giây này" để điền nhanh.</p>
+      </div>
+    </section>
+
+    <!-- ② CHỌN ĐOẠN + TIMELINE -->
+    <section class="card area-b" aria-labelledby="h-b">
+      <h2 id="h-b"><span class="num">2</span> Chọn đoạn cần thay</h2>
+      <p class="hint">Tích 1, 2 hoặc cả 3 đoạn. Các đoạn không được chồng lên nhau.</p>
+
+      <div class="segment-grid">
+        <label class="segment-card" :class="{ selected: seg.intro.enabled }">
+          <span class="seg-head"><input type="checkbox" x-model="seg.intro.enabled"> <strong>Intro</strong></span>
+          <span class="seg-desc">Từ đầu đến giây</span>
+          <input type="number" class="input input-sm" min="0" step="0.1" x-model.number="seg.intro.end"
+                 :disabled="!seg.intro.enabled" aria-label="Intro kết thúc ở giây" @focus="focused = 'intro.end'">
+        </label>
+        <label class="segment-card" :class="{ selected: seg.custom.enabled }">
+          <span class="seg-head"><input type="checkbox" x-model="seg.custom.enabled"> <strong>Tuỳ chọn</strong></span>
+          <span class="seg-desc">Từ giây → đến giây</span>
+          <span class="row-sm">
+            <input type="number" class="input input-sm" min="0" step="0.1" x-model.number="seg.custom.start"
+                   :disabled="!seg.custom.enabled" aria-label="Tuỳ chọn bắt đầu ở giây" @focus="focused = 'custom.start'">
+            <input type="number" class="input input-sm" min="0" step="0.1" x-model.number="seg.custom.end"
+                   :disabled="!seg.custom.enabled" aria-label="Tuỳ chọn kết thúc ở giây" @focus="focused = 'custom.end'">
+          </span>
+        </label>
+        <label class="segment-card" :class="{ selected: seg.outro.enabled }">
+          <span class="seg-head"><input type="checkbox" x-model="seg.outro.enabled"> <strong>Outro</strong></span>
+          <span class="seg-desc">Từ giây đến hết</span>
+          <input type="number" class="input input-sm" min="0" step="0.1" x-model.number="seg.outro.start"
+                 :disabled="!seg.outro.enabled" aria-label="Outro bắt đầu ở giây" @focus="focused = 'outro.start'">
+        </label>
+      </div>
+      <p class="error" role="alert" x-show="overlapError" x-text="overlapError"></p>
+
+      <h3 class="sub">Timeline &amp; hiệu ứng chuyển cảnh <span class="opt">(tuỳ chọn)</span></h3>
+      <p class="hint">Kéo hiệu ứng từ bảng bên dưới vào ô <strong>●</strong> giữa các đoạn. Bấm vào ● để chọn bằng bàn phím.</p>
+
+      <div class="timeline" x-show="parts.length > 0" role="group" aria-label="Timeline các đoạn">
+        <template x-for="(p, i) in parts" :key="i">
+          <div class="tl-item">
+            <div class="tl-block" :class="p.kind" x-text="p.label + ' (' + p.start + '–' + p.end + 's)'"></div>
+            <div class="tl-joint" x-show="i < parts.length - 1"
+                 :class="{ filled: transitionFor(i).type !== 'none', over: dragOver === i }"
+                 tabindex="0" role="button" :aria-label="'Mối nối ' + (i + 1) + ': ' + jointLabels[i]"
+                 @dragover.prevent="dragOver = i" @dragleave="dragOver = null"
+                 @drop.prevent="dropEffect(i)" @click="openJoint(i)" @keydown.enter.prevent="openJoint(i)">
+              <span class="joint-dot" aria-hidden="true">●</span>
+              <span class="joint-name" x-text="transitionFor(i).type === 'none' ? 'Mối nối ' + (i + 1) : effectLabel(transitionFor(i).type) + ' ' + transitionFor(i).duration + 's'"></span>
+              <button type="button" class="btn-x" x-show="transitionFor(i).type !== 'none'"
+                      @click.stop="setTransition(i, 'none')" :aria-label="'Bỏ hiệu ứng mối nối ' + (i + 1)">✕</button>
+            </div>
+          </div>
+        </template>
+      </div>
+      <p class="hint" x-show="parts.length === 0">Tích chọn đoạn ở trên để xem timeline.</p>
+
+      <div class="palette" role="list" aria-label="Hiệu ứng">
+        <template x-for="fx in effects" :key="fx.id">
+          <button type="button" class="chip" draggable="true" role="listitem"
+                  @dragstart="dragFx = fx.id" @dragend="dragFx = null; dragOver = null"
+                  @click="applyDefault(fx.id)" :title="'Kéo vào mối nối, hoặc bấm để áp cho tất cả: ' + fx.label">
+            <span class="chip-icon" aria-hidden="true" x-text="fx.icon"></span><span x-text="fx.label"></span>
+          </button>
+        </template>
+        <label class="field-inline">Thời lượng
+          <select class="select select-sm" x-model="fxDuration" aria-label="Thời lượng hiệu ứng">
+            <option value="0.3">0.3s</option><option value="0.5">0.5s</option><option value="1">1s</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="joint-panel" x-show="openedJoint !== null" x-cloak>
+        <p><strong x-text="'Mối nối ' + (openedJoint + 1)"></strong> — chọn hiệu ứng:</p>
+        <div class="row-sm" x-show="transitionFor(openedJoint).type !== 'none'">
+          <label class="field-inline">Thời lượng
+            <select class="select select-sm" :value="transitionFor(openedJoint).duration"
+                    @change="setJointDuration(openedJoint, $event.target.value)" aria-label="Thời lượng hiệu ứng mối nối">
+              <option value="0.3">0.3s</option><option value="0.5">0.5s</option><option value="1">1s</option>
+            </select></label>
+        </div>
+        <div class="palette">
+          <template x-for="fx in effects" :key="'j' + fx.id">
+            <button type="button" class="chip" @click="setTransition(openedJoint, fx.id); openedJoint = null"
+                    x-text="fx.icon + ' ' + fx.label"></button>
+          </template>
+          <button type="button" class="btn btn-sm" @click="openedJoint = null">Đóng</button>
+        </div>
+        <div class="anim-row">
+          <canvas class="anim" width="240" height="90" aria-label="Xem trước hiệu ứng" x-ref="anim"></canvas>
+          <button type="button" class="btn btn-sm" @click="previewAnim()" :disabled="transitionFor(openedJoint).type === 'none'">▶ Xem hiệu ứng</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ SOURCE / AUDIO / TEXT -->
+    <section class="card area-c" aria-labelledby="h-c">
+      <h2 id="h-c"><span class="num">3</span> Source, audio &amp; text</h2>
+      <div class="tabs" role="tablist" aria-label="Chọn loại thay">
+        <button type="button" role="tab" :aria-selected="tab === 'source'" :class="{ on: tab === 'source' }"
+                @click="tab = 'source'">Source thay</button>
+        <button type="button" role="tab" :aria-selected="tab === 'audio'" :class="{ on: tab === 'audio' }"
+                @click="tab = 'audio'">Audio</button>
+        <button type="button" role="tab" :aria-selected="tab === 'text'" :class="{ on: tab === 'text' }"
+                @click="tab = 'text'">Text</button>
+      </div>
+
+      <!-- Source -->
+      <div x-show="tab === 'source'" role="tabpanel">
+        <p class="hint" x-show="activeSegments.length === 0">Chưa tích đoạn nào ở ②.</p>
+        <template x-for="s in activeSegments" :key="s.key">
+          <div class="source-block">
+            <strong x-text="'Source cho ' + s.label"></strong>
+            <div class="row">
+              <input class="input flex-1" :aria-label="'Thư mục source ' + s.label" x-model.trim="seg[s.key].source_dir"
+                     placeholder="Dán đường dẫn hoặc bấm Chọn">
+              <button class="btn" type="button" @click="pickSource(s.key)">Chọn…</button>
+            </div>
+            <p class="file-meta" x-show="seg[s.key].files.length > 0"
+               x-text="seg[s.key].files.length + ' file video'"></p>
+            <p class="warn" x-show="seg[s.key].short.length > 0" role="status">
+              ⚠️ <span x-text="seg[s.key].short.length"></span> source ngắn hơn đoạn cần thay (sẽ xử lý khi bấm Chạy)
+            </p>
+          </div>
+        </template>
+      </div>
+
+      <!-- Audio -->
+      <div x-show="tab === 'audio'" role="tabpanel">
+        <p class="hint">Không chọn file nào = giữ nguyên audio gốc. Audio chạy liền mạch xuyên suốt video.</p>
+        <div class="row">
+          <input class="input flex-1" aria-label="Thư mục audio" x-model.trim="form.audio_dir"
+                 placeholder="Thư mục chứa file audio (tuỳ chọn)">
+          <button class="btn" type="button" @click="pick('audio_dir')">Chọn…</button>
+        </div>
+        <div class="file-list" x-show="audioFiles.length > 0">
+          <template x-for="a in audioFiles" :key="a.path">
+            <div class="file-item">
+              <span class="file-icon" aria-hidden="true">🔈</span>
+              <span class="file-name" x-text="a.name"></span>
+              <select class="select select-sm" :aria-label="'Ngôn ngữ của ' + a.name" x-model="a.lang">
+                <option value="">Chọn ngôn ngữ…</option>
+                <template x-for="l in languageOptions" :key="l"><option :value="l" x-text="l.toUpperCase()"></option></template>
+              </select>
+            </div>
+          </template>
+        </div>
+        <p class="warn" x-show="audioFiles.some(a => !a.lang)">Có file chưa chọn ngôn ngữ — hãy chọn để tên file đúng.</p>
+      </div>
+
+      <!-- Text -->
+      <div x-show="tab === 'text'" role="tabpanel">
+        <p class="hint">① Chọn thời điểm có text → ② kéo khung quanh text cũ → ③ điền text mới theo từng ngôn ngữ.</p>
+        <div class="row-sm">
+          <input type="number" min="0" step="0.5" class="input input-sm" aria-label="Giây để lấy khung hình"
+                 x-model.number="frameAt">
+          <button class="btn btn-sm" type="button" @click="loadFrame()" :disabled="!form.input_dir || !firstVideo">Lấy khung hình</button>
+          <span class="file-meta" x-show="frameInfo" x-text="frameInfo"></span>
+        </div>
+        <div class="frame-wrap" x-show="frameUrl" @pointerdown="boxStart($event)" @pointermove="boxMove($event)" @pointerup="boxEnd()">
+          <img class="frame" :src="frameUrl" alt="Khung hình video, kéo chuột để vẽ vùng text" x-ref="frame" draggable="false">
+          <div class="box" x-show="drawing" :style="drawStyle"></div>
+          <template x-for="(r, ri) in textRegions" :key="ri">
+            <div class="box saved" :style="regionStyle(r)"><span x-text="r.name || ('Vùng ' + (ri + 1))"></span></div>
+          </template>
+        </div>
+        <p class="hint" x-show="frameUrl">Kéo chuột trên hình để vẽ vùng text cũ.</p>
+
+        <div class="text-regions">
+          <template x-for="(r, ri) in textRegions" :key="ri">
+            <div class="text-region-card">
+              <div class="row">
+                <input class="input input-sm flex-1" aria-label="Tên vùng text" x-model="r.name" placeholder="Tên vùng (vd: Tiêu đề)">
+                <button class="btn btn-sm btn-ghost" type="button" @click="textRegions.splice(ri, 1)" aria-label="Xoá vùng">✕</button>
+              </div>
+              <p class="file-meta" x-text="'Vị trí: x ' + r.x + ', y ' + r.y + ' · ' + r.width + '×' + r.height + ' px'"></p>
+              <template x-for="lang in textLangs" :key="lang">
+                <label class="row-sm lang-row"><span class="lang-tag" x-text="lang.toUpperCase()"></span>
+                  <input class="input input-sm flex-1" x-model="r.texts[lang]" :placeholder="'Text ' + lang.toUpperCase()">
+                </label>
+              </template>
+              <details class="style-box">
+                <summary>Kiểu chữ</summary>
+                <div class="style-grid">
+                  <label class="field">Font
+                    <select class="select select-sm" x-model="r.style.font">
+                      <option>Fira Sans</option><option>Arial</option><option>Times New Roman</option>
+                      <option>Tahoma</option><option>Verdana</option>
+                    </select></label>
+                  <label class="field">Cỡ chữ
+                    <input type="number" class="input input-sm" min="8" max="300" x-model.number="r.style.size"></label>
+                  <label class="field">Màu chữ
+                    <input type="color" class="color" x-model="r.style.color"></label>
+                  <label class="field">Căn
+                    <select class="select select-sm" x-model="r.style.align">
+                      <option value="left">Trái</option><option value="center">Giữa</option><option value="right">Phải</option>
+                    </select></label>
+                  <label class="field-inline"><input type="checkbox" x-model="r.style.bold"> Đậm</label>
+                  <label class="field-inline"><input type="checkbox" x-model="r.style.shadow"> Bóng</label>
+                  <label class="field">Viền
+                    <input type="number" class="input input-sm" min="0" max="20" x-model.number="r.style.stroke_width"></label>
+                  <label class="field">Màu viền
+                    <input type="color" class="color" x-model="r.style.stroke_color"></label>
+                </div>
+              </details>
+            </div>
+          </template>
+        </div>
+        <div class="row mt">
+          <div class="row-sm">
+            <input class="input input-sm" x-model.trim="newLang" placeholder="Mã ngôn ngữ (vd: pt)" style="width:150px"
+                   aria-label="Mã ngôn ngữ mới" @keydown.enter.prevent="addTextLang()">
+            <button class="btn btn-sm" type="button" @click="addTextLang()">+ Ngôn ngữ</button>
+          </div>
+          <span class="file-meta" x-text="'Ngôn ngữ: ' + textLangs.join(', ')"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ④ CHẠY + KẾT QUẢ -->
+    <section class="card area-d" aria-labelledby="h-d">
+      <h2 id="h-d"><span class="num">4</span> Đặt tên, chạy &amp; kết quả</h2>
+      <div class="naming-grid">
+        <label class="field">Tên app (viết tắt store)
+          <input class="input" x-model.trim="naming.appname" placeholder="MyApp-GP"></label>
+        <label class="field">Concept
+          <input class="input" x-model.trim="naming.concept" placeholder="SummerSale"></label>
+        <label class="field">Geo
+          <select class="select" x-model="naming.geo">
+            <template x-for="g in geos" :key="g"><option :value="g" x-text="g"></option></template>
+          </select></label>
+        <label class="field">Ngày (ddmmyy)
+          <input class="input" x-model.trim="naming.date" :placeholder="todayStr"></label>
+      </div>
+      <div class="preview-box" x-show="previewNames.length > 0">
+        <strong>Xem trước tên file:</strong>
+        <template x-for="n in previewNames" :key="n"><div class="preview-name" x-text="n"></div></template>
+      </div>
+
+      <label class="field">Thư mục Output
+        <span class="row">
+          <input class="input flex-1" x-model.trim="form.output_dir" placeholder="Thư mục lưu kết quả">
+          <button class="btn" type="button" @click="pick('output_dir')">Chọn…</button>
+        </span>
+      </label>
+
+      <div class="estimate" x-show="job.status !== 'running'">
+        <p>Dự kiến: <strong x-text="estimate"></strong> video</p>
+        <p class="warn" x-show="runReasons.length > 0">
+          <template x-for="r in runReasons" :key="r"><span class="block" x-text="'• ' + r"></span></template>
+        </p>
+      </div>
+
+      <div class="short-box" x-show="shortWarnings.length > 0" role="alert">
+        <p><strong>Có source ngắn hơn đoạn cần thay:</strong></p>
+        <ul>
+          <template x-for="w in shortWarnings" :key="w.source">
+            <li x-text="w.source + ' (' + w.source_dur + 's) < ' + w.segment + ' (' + w.segment_dur + 's)'"></li>
+          </template>
+        </ul>
+        <p>Chọn cách xử lý cho tất cả:</p>
+        <div class="row-sm">
+          <label class="field-inline"><input type="radio" name="short" value="trim" x-model="shortAction"> Co đoạn lại bằng source</label>
+          <label class="field-inline"><input type="radio" name="short" value="skip" x-model="shortAction"> Bỏ qua, giữ đoạn gốc</label>
+        </div>
+      </div>
+
+      <div class="row mt">
+        <button class="btn btn-primary btn-lg" type="button" @click="startJob()"
+                x-show="job.status !== 'running'" :disabled="!canRun || busy">🚀 Chạy</button>
+        <button class="btn btn-danger btn-lg" type="button" x-show="job.status === 'running'" @click="stopJob()">⏹ Dừng</button>
+      </div>
+
+      <div class="progress-section" x-show="job.status === 'running' || job.status === 'stopped' || job.status === 'error' || job.status === 'done'" aria-live="polite">
+        <h3 class="sub" x-text="statusTitle"></h3>
+        <progress class="progress" :max="job.total || 1" :value="job.done" aria-label="Tiến độ"></progress>
+        <p class="progress-text"><span x-text="job.done"></span> / <span x-text="job.total"></span> ·
+          <span x-text="progressPct + '%'"></span></p>
+        <p class="file-meta" x-show="job.status === 'running'" x-text="'Đang xử lý: ' + (job.current || '…')"></p>
+        <p class="error" x-show="job.error" x-text="job.error"></p>
+      </div>
+
+      <div class="results" x-show="job.outputs && job.outputs.length > 0 && job.status !== 'running'">
+        <p>✅ Thành công: <strong x-text="job.ok"></strong> · ❌ Lỗi:
+          <strong x-text="job.outputs.length - job.ok"></strong></p>
+        <div class="row-sm">
+          <button class="btn btn-sm" type="button" @click="openFolder()">📂 Mở thư mục kết quả</button>
+          <span class="file-meta" x-text="'Báo cáo: ' + job.output_dir + '/report.csv'"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="results-table">
+            <thead><tr><th>Video gốc</th><th>Ngôn ngữ</th><th>Trạng thái</th><th>Ghi chú</th><th></th></tr></thead>
+            <tbody>
+              <template x-for="(o, oi) in job.outputs" :key="oi">
+                <tr>
+                  <td x-text="o.source"></td>
+                  <td x-text="o.language"></td>
+                  <td :class="o.ok ? 'ok' : 'bad'" x-text="o.ok ? 'OK' : 'Lỗi: ' + o.error"></td>
+                  <td x-text="o.note"></td>
+                  <td><button class="btn btn-sm" type="button" x-show="o.ok" @click="playOutput(o)">Xem</button></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="player-wrap" x-show="outPreview">
+          <p class="file-meta" x-text="outPreview ? outPreview.name : ''"></p>
+          <video controls class="player" x-ref="outPlayer" aria-label="Xem video đầu ra"></video>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer"><span>Video Bulk Remixer · Lutech · chạy offline trên máy của bạn</span></footer>
+</div>
+</body>
+</html>
