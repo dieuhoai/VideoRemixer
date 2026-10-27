@@ -74,6 +74,9 @@ function app() {
     frameInfo: "",
     frameW: 0,
     frameH: 0,
+    frameLang: "",
+    frameRenderUrl: "",
+    renderSeq: 0,
     drawing: false,
     drawFrom: null,
     drawRect: null,
@@ -84,6 +87,9 @@ function app() {
     job: { status: "idle", done: 0, total: 0, current: "", ok: 0, outputs: [], failed: [], error: "", output_dir: "" },
     outPreview: null,
     lastPreview: false,
+    textPreviewUrl: "",
+    textPreviewInfo: "",
+    textPreviewBusy: false,
     shortWarnings: [],
     shortAction: "trim",
     shownShortFor: "",
@@ -254,11 +260,59 @@ function app() {
       if (!v.duration) { this.message = v.error || "Không đọc được video này"; return; }
       this.preview = v;
       this.now = 0;
+      this.clearTextPreview();
       this.$nextTick(() => {
         const p = document.getElementById("player");
         p.src = this.mediaUrl(v.path);
         p.load();
       });
+    },
+    /* Xem trước có text đã thay: dựng một đoạn ngắn đúng cách chạy thật rồi phát trong trình phát. */
+    clearTextPreview() {
+      if (this.textPreviewUrl) URL.revokeObjectURL(this.textPreviewUrl);
+      this.textPreviewUrl = "";
+      this.textPreviewInfo = "";
+    },
+    showRawPreview() {
+      if (!this.preview) return;
+      this.clearTextPreview();
+      const p = document.getElementById("player");
+      if (p) { p.src = this.mediaUrl(this.preview.path); p.load(); }
+    },
+    async previewWithText() {
+      const src = this.preview;
+      const lang = this.frameLang || this.textLangs[0] || "";
+      if (!src) { this.message = "Hãy chọn một video để xem trước."; return; }
+      if (!lang) { this.message = "Chưa có ngôn ngữ để xem text."; return; }
+      const regions = this.textRegions
+        .filter(r => (r.texts[lang] || "").trim())
+        .map(r => ({ name: r.name, texts: { [lang]: r.texts[lang] },
+          region: { x: r.x, y: r.y, width: r.width, height: r.height }, style: r.style }));
+      if (regions.length === 0) { this.message = "Chưa điền text mới cho ngôn ngữ " + lang.toUpperCase() + "."; return; }
+      const t = Math.max(0, Number(this.frameAt) || 0);
+      this.textPreviewBusy = true;
+      this.textPreviewInfo = "Đang dựng đoạn xem trước (khoảng 5–10 giây)…";
+      try {
+        const r = await fetch("/api/fs/clip-text", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: src.path, t, duration: 8, w: 1280, language: lang, regions }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || "Không dựng được đoạn xem trước");
+        }
+        const blob = await r.blob();
+        this.clearTextPreview();
+        this.textPreviewUrl = URL.createObjectURL(blob);
+        const p = document.getElementById("player");
+        p.src = this.textPreviewUrl;
+        p.load();
+        this.textPreviewInfo = "Đang xem có text " + lang.toUpperCase() + " (từ giây " + t.toFixed(1) + ", 8 giây)";
+      } catch (e) {
+        this.textPreviewInfo = e.message;
+      } finally {
+        this.textPreviewBusy = false;
+      }
     },
     setFocusedFromNow() {
       if (!this.focused) { this.message = "Hãy bấm vào một ô giây ở ô 2 trước."; return; }
@@ -353,7 +407,37 @@ function app() {
         if (this.frameUrl) URL.revokeObjectURL(this.frameUrl);
         this.frameUrl = URL.createObjectURL(blob);
         this.frameInfo = "Video " + this.frameW + "×" + this.frameH + " px";
+        this.frameRenderUrl = "";
+        this.renderFrame();
       } catch (e) { this.frameInfo = e.message; }
+    },
+    /* Vẽ text mới lên khung hình xem trước (cùng cách với lúc chạy thật). */
+    async renderFrame() {
+      const src = this.preview || this.firstVideo;
+      const lang = this.frameLang || this.textLangs[0] || "";
+      const seq = ++this.renderSeq;
+      const regions = this.textRegions
+        .filter(r => (r.texts[lang] || "").trim())
+        .map(r => ({ name: r.name, texts: { [lang]: r.texts[lang] },
+          region: { x: r.x, y: r.y, width: r.width, height: r.height }, style: r.style }));
+      if (!src || !this.frameUrl || !lang || regions.length === 0) {
+        this.frameRenderUrl = "";
+        return;
+      }
+      try {
+        const r = await fetch("/api/fs/frame-text", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: src.path, t: this.frameAt || 0, w: 1280, language: lang, regions }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || "Không xem trước được text");
+        }
+        const blob = await r.blob();
+        if (seq !== this.renderSeq) return;
+        if (this.frameRenderUrl) URL.revokeObjectURL(this.frameRenderUrl);
+        this.frameRenderUrl = URL.createObjectURL(blob);
+      } catch (e) { if (seq === this.renderSeq) this.frameInfo = e.message; }
     },
     boxStart(e) {
       const img = this.$refs.frame;

@@ -154,6 +154,45 @@ def _prepare(replacements: list[TextReplacement], language: str, w: int, h: int)
     return regions, notes
 
 
+def _apply_regions(frame: np.ndarray, regions: list[_Region], refresh_now: bool) -> None:
+    """Xoá text cũ rồi vẽ text mới lên `frame` (BGR, sửa tại chỗ)."""
+    for reg in regions:
+        if reg.clean is None or refresh_now:
+            reg.clean = cv2.inpaint(frame[reg.y0:reg.y1, reg.x0:reg.x1].copy(), reg.mask, 3, cv2.INPAINT_TELEA)
+        bg = frame[reg.y0:reg.y1, reg.x0:reg.x1]
+        m = reg.mask == 255
+        bg[m] = reg.clean[m]
+        ov = reg.overlay
+        alpha = ov[..., 3:4].astype(np.float32) / 255.0
+        rgb_bgr = ov[..., [2, 1, 0]].astype(np.float32)
+        sub = frame[reg.y0:reg.y1, reg.x0:reg.x1].astype(np.float32)
+        frame[reg.y0:reg.y1, reg.x0:reg.x1] = (sub * (1 - alpha) + rgb_bgr * alpha).astype(np.uint8)
+
+
+def decode_frame(video: Path, t: float, w: int, h: int) -> np.ndarray:
+    """Đọc đúng 1 khung hình (BGR) tại giây t, cắt về w x h (số chẵn)."""
+    r = subprocess.run(
+        [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(video),
+         "-frames:v", "1", "-an", "-vf", f"crop={w}:{h}:0:0", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"],
+        capture_output=True, timeout=60, creationflags=_NO_WINDOW,
+    )
+    if r.returncode != 0 or len(r.stdout) < w * h * 3:
+        raise FFmpegError("không lấy được khung hình để xem trước")
+    return np.frombuffer(r.stdout[: w * h * 3], dtype=np.uint8).reshape(h, w, 3).copy()
+
+
+def render_text_on_frame(frame: np.ndarray, replacements: list[TextReplacement], language: str) -> np.ndarray:
+    """Áp text thay thế của `language` lên một khung hình BGR (dùng cho xem trước). Trả về ảnh mới."""
+    out = frame.copy()
+    active = [r for r in replacements if (r.texts_by_lang.get(language) or "").strip()]
+    if not active:
+        return out
+    h, w = out.shape[:2]
+    regions, _ = _prepare(active, language, w, h)
+    _apply_regions(out, regions, refresh_now=True)
+    return out
+
+
 def replace_text_on_video(
     video: Path,
     replacements: list[TextReplacement],
@@ -201,18 +240,7 @@ def replace_text_on_video(
                 if cancel and index % 10 == 0 and cancel():
                     raise Cancelled()
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3).copy()
-                for reg in regions:
-                    if reg.clean is None or index % refresh == 0:
-                        reg.clean = cv2.inpaint(frame[reg.y0:reg.y1, reg.x0:reg.x1].copy(), reg.mask, 3,
-                                                cv2.INPAINT_TELEA)
-                    bg = frame[reg.y0:reg.y1, reg.x0:reg.x1]
-                    m = reg.mask == 255
-                    bg[m] = reg.clean[m]
-                    ov = reg.overlay
-                    alpha = ov[..., 3:4].astype(np.float32) / 255.0
-                    rgb_bgr = ov[..., [2, 1, 0]].astype(np.float32)
-                    sub = frame[reg.y0:reg.y1, reg.x0:reg.x1].astype(np.float32)
-                    frame[reg.y0:reg.y1, reg.x0:reg.x1] = (sub * (1 - alpha) + rgb_bgr * alpha).astype(np.uint8)
+                _apply_regions(frame, regions, index % refresh == 0)
                 enc.stdin.write(frame.tobytes())
                 index += 1
             enc.stdin.close()

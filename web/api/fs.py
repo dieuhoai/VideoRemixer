@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+import cv2
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from videobulkremixer.ff import _NO_WINDOW, FFmpegError, ffmpeg_bin, probe
 from videobulkremixer.orchestrator import VIDEO_EXTS, list_videos
+from videobulkremixer.text_replacer import decode_frame, render_text_on_frame, replace_text_on_video
+from web.api.jobs import parse_texts
 
 router = APIRouter(prefix="/api/fs")
 AUDIO_EXTS = {".mp3", ".wav", ".aac", ".m4a", ".ogg", ".flac"}
@@ -117,6 +122,77 @@ def frame(path: str = Query(...), t: float = Query(0.0, ge=0), w: int = Query(12
     return Response(r.stdout, media_type="image/jpeg",
                     headers={"X-Video-Width": str(info.width), "X-Video-Height": str(info.height),
                              "X-Video-Duration": f"{info.duration:.2f}", "Cache-Control": "no-store"})
+
+
+@router.post("/frame-text")
+def frame_with_text(body: dict) -> Response:
+    """Khung hình (JPEG) đã thay text theo đúng cách chạy thật — để xem trước trên giao diện."""
+    p = _checked_file(str(body.get("path", "")), VIDEO_EXTS)
+    lang = str(body.get("language", "")).strip().lower()
+    if not lang:
+        raise HTTPException(422, "Chưa chọn ngôn ngữ để xem trước")
+    try:
+        info = probe(str(p))
+        w_even, h_even = info.width - info.width % 2, info.height - info.height % 2
+        t = min(max(float(body.get("t", 0) or 0), 0.0), max(info.duration - 0.05, 0.0))
+        replacements = parse_texts(body.get("regions") or [])
+        frame = decode_frame(p, t, w_even, h_even)
+        out = render_text_on_frame(frame, replacements, lang)
+    except FFmpegError as e:
+        raise HTTPException(422, str(e)) from e
+    except (KeyError, ValueError, TypeError) as e:
+        raise HTTPException(422, f"Vùng text chưa đúng: {e}") from e
+    max_w = min(max(int(body.get("w", 1280) or 1280), 40), 3840)
+    if out.shape[1] > max_w:
+        scale = max_w / out.shape[1]
+        out = cv2.resize(out, (max_w, max(2, int(out.shape[0] * scale) // 2 * 2)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        raise HTTPException(422, "Không tạo được ảnh xem trước")
+    return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/clip-text")
+def clip_with_text(body: dict) -> Response:
+    """Đoạn video ngắn (có tiếng) đã thay text đúng cách chạy thật — để xem trước trong trình phát."""
+    p = _checked_file(str(body.get("path", "")), VIDEO_EXTS)
+    lang = str(body.get("language", "")).strip().lower()
+    if not lang:
+        raise HTTPException(422, "Chưa chọn ngôn ngữ để xem trước")
+    work = Path(tempfile.mkdtemp(prefix="vrm_clip_"))
+    try:
+        info = probe(str(p))
+        start = min(max(float(body.get("t", 0) or 0), 0.0), max(info.duration - 1.0, 0.0))
+        dur = min(max(float(body.get("duration", 8) or 8), 2.0), 15.0, info.duration - start)
+        replacements = parse_texts(body.get("regions") or [])
+        clip = work / "clip.mp4"
+        r = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
+             "-i", str(p), "-vf", "scale='2*floor(min(1280,iw)/2)':-2", "-c:v", "libx264", "-preset", "veryfast",
+             "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", str(clip)],
+            capture_output=True, timeout=120, creationflags=_NO_WINDOW,
+        )
+        if r.returncode != 0:
+            raise FFmpegError("không cắt được đoạn xem trước")
+        res = replace_text_on_video(clip, replacements, lang, work / "text.mp4")
+        if res.output is None:
+            raise HTTPException(422, "Chưa có text nào cho ngôn ngữ này")
+        final = work / "preview.mp4"
+        r = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(res.output), "-i", str(clip),
+             "-map", "0:v:0", "-map", "1:a:0?", "-c", "copy", "-movflags", "+faststart", str(final)],
+            capture_output=True, timeout=120, creationflags=_NO_WINDOW,
+        )
+        if r.returncode != 0:
+            raise FFmpegError("không ghép được đoạn xem trước")
+        data = final.read_bytes()
+    except FFmpegError as e:
+        raise HTTPException(422, str(e)) from e
+    except (KeyError, ValueError, TypeError) as e:
+        raise HTTPException(422, f"Vùng text chưa đúng: {e}") from e
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return Response(data, media_type="video/mp4", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/open")

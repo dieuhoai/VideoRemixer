@@ -34,6 +34,20 @@ def _transition(raw: dict | None) -> TransitionConfig:
     return TransitionConfig(TransitionType(raw.get("type", "none")), float(raw.get("duration", 0.5)))
 
 
+def parse_texts(raw: list[dict[str, Any]]) -> list[TextReplacement]:
+    """Danh sách vùng text từ giao diện → TextReplacement."""
+    texts = []
+    for t in raw:
+        r = t["region"]
+        region = TextRegion(name=t.get("name") or "Vùng text", x=int(r["x"]), y=int(r["y"]),
+                            width=int(r["width"]), height=int(r["height"]))
+        style = TextStyle(**{k: v for k, v in (t.get("style") or {}).items() if k in _STYLE_KEYS})
+        texts.append(TextReplacement(region=region, texts_by_lang={str(k): str(v) for k, v in
+                                                                   (t.get("texts") or {}).items()},
+                                     style=style))
+    return texts
+
+
 def parse_config(body: dict[str, Any]) -> JobConfig:
     """Đổi JSON từ giao diện thành JobConfig; lỗi dữ liệu → ValueError với câu tiếng Việt."""
     segments = []
@@ -49,15 +63,7 @@ def parse_config(body: dict[str, Any]) -> JobConfig:
         audio_files=[Path(p) for p in body.get("audio_files", [])],
         language_labels={str(k): str(v) for k, v in (body.get("audio_labels") or {}).items()},
     )
-    texts = []
-    for t in body.get("texts", []):
-        r = t["region"]
-        region = TextRegion(name=t.get("name") or "Vùng text", x=int(r["x"]), y=int(r["y"]),
-                            width=int(r["width"]), height=int(r["height"]))
-        style = TextStyle(**{k: v for k, v in (t.get("style") or {}).items() if k in _STYLE_KEYS})
-        texts.append(TextReplacement(region=region, texts_by_lang={str(k): str(v) for k, v in
-                                                                   (t.get("texts") or {}).items()},
-                                     style=style))
+    texts = parse_texts(body.get("texts", []))
     transitions = {str(k): _transition(v) for k, v in (body.get("transitions") or {}).items()}
     n = body.get("naming") or {}
     return JobConfig(

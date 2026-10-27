@@ -51,11 +51,18 @@
       <div class="preview" x-show="preview">
         <p class="preview-title" x-text="'Xem trước: ' + (preview ? preview.name : '')"></p>
         <video id="player" controls preload="metadata" class="player" aria-label="Xem trước video gốc"
-               @timeupdate="now = $el.currentTime" @loadedmetadata="now = 0"></video>
+               @timeupdate="now = $el.currentTime" @loadedmetadata="now = textPreviewUrl ? now : 0"></video>
         <div class="row-sm">
           <span class="file-meta" aria-live="polite">Đang ở giây: <strong x-text="now.toFixed(1)"></strong></span>
           <button class="btn btn-sm" type="button" @click="setFocusedFromNow()">Lấy giây này →</button>
         </div>
+        <div class="row-sm">
+          <button class="btn btn-sm" type="button" @click="previewWithText()"
+                  :disabled="textPreviewBusy || textRegions.length === 0">▶ Xem với text đã thay</button>
+          <button class="btn btn-sm btn-ghost" type="button" x-show="textPreviewUrl" @click="showRawPreview()">Quay lại video gốc</button>
+          <span class="file-meta" aria-live="polite" x-show="textPreviewInfo" x-text="textPreviewInfo"></span>
+        </div>
+        <p class="hint">"Xem với text đã thay" dựng 8 giây từ giây ghi ở ô "Giây để lấy khung hình" (tab Text), có cả text và tiếng. Mất vài giây.</p>
         <p class="hint">Chọn ô giây ở ② (ví dụ "Intro đến giây") rồi bấm "Lấy giây này" để điền nhanh.</p>
       </div>
     </section>
@@ -213,10 +220,14 @@
           <input type="number" min="0" step="0.5" class="input input-sm" aria-label="Giây để lấy khung hình"
                  x-model.number="frameAt">
           <button class="btn btn-sm" type="button" @click="loadFrame()" :disabled="!form.input_dir || !firstVideo">Lấy khung hình</button>
+          <select class="input input-sm" aria-label="Ngôn ngữ xem trước text" x-show="textLangs.length"
+                  x-model="frameLang" @change="renderFrame()">
+            <template x-for="l in textLangs" :key="l"><option :value="l" x-text="'Xem: ' + l.toUpperCase()"></option></template>
+          </select>
           <span class="file-meta" x-show="frameInfo" x-text="frameInfo"></span>
         </div>
         <div class="frame-wrap" x-show="frameUrl" @pointerdown="boxStart($event)" @pointermove="boxMove($event)" @pointerup="boxEnd()">
-          <img class="frame" :src="frameUrl" alt="Khung hình video, kéo chuột để vẽ vùng text" x-ref="frame" draggable="false">
+          <img class="frame" :src="frameRenderUrl || frameUrl" alt="Khung hình video, kéo chuột để vẽ vùng text" x-ref="frame" draggable="false">
           <div class="box" x-show="drawing" :style="drawStyle"></div>
           <template x-for="(r, ri) in textRegions" :key="ri">
             <div class="box saved" :style="regionStyle(r)"><span x-text="r.name || ('Vùng ' + (ri + 1))"></span></div>
@@ -229,12 +240,12 @@
             <div class="text-region-card">
               <div class="row">
                 <input class="input input-sm flex-1" aria-label="Tên vùng text" x-model="r.name" placeholder="Tên vùng (vd: Tiêu đề)">
-                <button class="btn btn-sm btn-ghost" type="button" @click="textRegions.splice(ri, 1)" aria-label="Xoá vùng">✕</button>
+                <button class="btn btn-sm btn-ghost" type="button" @click="textRegions.splice(ri, 1); renderFrame()" aria-label="Xoá vùng">✕</button>
               </div>
               <p class="file-meta" x-text="'Vị trí: x ' + r.x + ', y ' + r.y + ' · ' + r.width + '×' + r.height + ' px'"></p>
               <template x-for="lang in textLangs" :key="lang">
                 <label class="row-sm lang-row"><span class="lang-tag" x-text="lang.toUpperCase()"></span>
-                  <input class="input input-sm flex-1" x-model="r.texts[lang]" :placeholder="'Text ' + lang.toUpperCase()">
+                  <input class="input input-sm flex-1" x-model="r.texts[lang]" @input.debounce.500ms="renderFrame()" :placeholder="'Text ' + lang.toUpperCase()">
                 </label>
               </template>
               <details class="style-box">
