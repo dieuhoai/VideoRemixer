@@ -77,6 +77,10 @@ class AudioConfig:
     def has_replacement(self) -> bool:
         return bool(self.music_files or self.voice_files)
 
+    def music_language(self, path: Path) -> str:
+        """Mã ngôn ngữ tuỳ chọn của nhạc nền (chỉ dùng để ghép vào tên file khi không có ngôn ngữ nào khác)."""
+        return (self.language_labels.get(path.name) or "").lower()
+
     def voice_language(self, path: Path) -> str:
         """Mã ngôn ngữ của file voice: ưu tiên nhãn người dùng chọn, sau đó đoán từ tên file."""
         from videobulkremixer.audio_mixer import guess_language_from_filename

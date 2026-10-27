@@ -46,14 +46,15 @@ def list_videos(directory: Path) -> list[Path]:
 @dataclass(frozen=True)
 class OutputSpec:
     lang: str  # "" = không có ngôn ngữ
-    music: Path | None  # nhạc nền (không có ngôn ngữ)
+    music: Path | None  # nhạc nền (ngôn ngữ tuỳ chọn)
     voice: Path | None  # voice thay thế (ngôn ngữ = lang)
     keep_original: bool  # giữ tiếng và nhạc gốc của video
     texts: tuple[TextReplacement, ...] = ()
+    music_lang: str = ""  # ngôn ngữ nhạc nền, chỉ dùng khi không có lang từ voice/text
 
     @property
     def folder_lang(self) -> str:
-        return self.lang or "orig"
+        return self.lang or self.music_lang or "orig"
 
 
 def build_output_plan(config: JobConfig) -> list[OutputSpec]:
@@ -67,7 +68,8 @@ def build_output_plan(config: JobConfig) -> list[OutputSpec]:
         langs.update(k for k, v in tr.texts_by_lang.items() if v and v.strip())
     musics: list[Path | None] = list(audio.music_files) or [None]
     if not langs:
-        return [OutputSpec(lang="", music=m, voice=None, keep_original=audio.keep_original) for m in musics]
+        return [OutputSpec(lang="", music=m, voice=None, keep_original=audio.keep_original,
+                           music_lang=audio.music_language(m) if m else "") for m in musics]
     plan: list[OutputSpec] = []
     for lang in sorted(langs):
         texts = tuple(tr for tr in config.text_replacements if (tr.texts_by_lang.get(lang) or "").strip())

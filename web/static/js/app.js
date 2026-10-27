@@ -50,7 +50,7 @@ function app() {
     languageOptions: LANGS,
     effects: EFFECTS,
 
-    form: { input_dir: "", output_dir: "", audio_dir: "" },
+    form: { input_dir: "", output_dir: "", voice_dir: "", music_dir: "" },
     videos: [],
     scanError: "",
     preview: null,
@@ -72,8 +72,12 @@ function app() {
     openedJoint: null,
 
     tab: "source",
-    audioFiles: [],
-    audioNote: "",
+    voiceFiles: [],
+    musicFiles: [],
+    voiceNote: "",
+    musicNote: "",
+    useVoice: true,
+    useMusic: true,
     keepOriginal: false,
     volumes: { music: 100, voice: 100, original: 100 },
     duckMusic: false,
@@ -129,11 +133,11 @@ function app() {
     get referenceDuration() {
       return (this.preview && this.preview.duration) || (this.firstVideo && this.firstVideo.duration) || 0;
     },
-    get musicFiles() { return this.audioFiles.filter(a => a.kind === "music"); },
-    get voiceFiles() { return this.audioFiles.filter(a => a.kind === "voice"); },
-    get hasAudioWork() { return this.musicFiles.length > 0 || this.voiceFiles.length > 0 || this.keepOriginal; },
+    get appliedVoice() { return this.useVoice ? this.voiceFiles : []; },
+    get appliedMusic() { return this.useMusic ? this.musicFiles : []; },
+    get hasAudioWork() { return this.appliedVoice.length > 0 || this.appliedMusic.length > 0 || this.keepOriginal; },
     get planLanguages() {
-      const langs = new Set(this.voiceFiles.map(a => a.lang).filter(Boolean));
+      const langs = new Set(this.appliedVoice.map(a => a.lang).filter(Boolean));
       for (const r of this.textRegions) {
         for (const l of this.textLangs) if ((r.texts[l] || "").trim()) langs.add(l);
       }
@@ -141,11 +145,11 @@ function app() {
     },
     get planCount() {
       const langs = this.planLanguages;
-      const music = Math.max(1, this.musicFiles.length);
+      const music = Math.max(1, this.appliedMusic.length);
       if (langs.length === 0) return music;
       let n = 0;
       for (const l of langs) {
-        n += Math.max(1, this.voiceFiles.filter(a => a.lang === l).length) * music;
+        n += Math.max(1, this.appliedVoice.filter(a => a.lang === l).length) * music;
       }
       return n;
     },
@@ -165,6 +169,7 @@ function app() {
       if (!this.form.output_dir) r.push("Chọn thư mục Output (ô 4)");
       if (this.form.output_dir && this.form.output_dir === this.form.input_dir) r.push("Output không được trùng thư mục video gốc");
       if (this.overlapError) r.push("Các đoạn đang chồng lên nhau");
+      if (this.appliedVoice.some(a => !a.lang)) r.push("Có voice chưa chọn ngôn ngữ (tab Audio)");
       if (this.activeSegments.length === 0 && !this.hasAudioWork && !this.hasTextWork) {
         r.push("Chưa chọn việc gì để thay (đoạn, audio hoặc text)");
       }
@@ -205,7 +210,8 @@ function app() {
     init() {
       this.checkUpdate();
       this.$watch("form.input_dir", (v) => { if (v) this.scanVideos(v); else this.videos = []; });
-      this.$watch("form.audio_dir", (v) => { if (v) this.scanAudio(v); });
+      this.$watch("form.voice_dir", (v) => { if (v) this.scanAudio("voice", v); });
+      this.$watch("form.music_dir", (v) => { if (v) this.scanAudio("music", v); });
       this.$watch(() => this.segSignature(), () => this.refreshTimeline());
       this.$watch(() => this.referenceDuration, () => this.refreshTimeline());
       this.$watch(() => this.seekValue, (v) => this.seekTo(v));
@@ -261,17 +267,18 @@ function app() {
         this.seg[key].short = [];
       } catch (e) { this.seg[key].files = []; }
     },
-    async scanAudio(dir) {
+    async scanAudio(kind, dir) {
+      const key = kind === "voice" ? "voice" : "music";
       try {
         const d = await api("GET", "/api/fs/list?kind=audio&dir=" + encodeURIComponent(dir));
-        this.audioFiles = (d.files || []).map(f => {
-          const lang = this.guessLang(f.name);
-          return { name: f.name, path: f.path, lang, kind: lang ? "voice" : "music" };
-        });
-        this.audioNote = d.error || (this.audioFiles.length === 0
-          ? "Không thấy file audio trong thư mục này (mp3, wav, m4a, aac, ogg, flac, opus, wma, aif). Kiểm tra lại đường dẫn, file có nằm trong thư mục con không."
+        const files = (d.files || []).map(f => ({
+          name: f.name, path: f.path, lang: kind === "voice" ? this.guessLang(f.name) : "",
+        }));
+        this[key + "Files"] = files;
+        this[key + "Note"] = d.error || (files.length === 0
+          ? "Không thấy file audio trong thư mục này (mp3, wav, m4a, aac, ogg, flac, opus, wma, aif)."
           : "");
-      } catch (e) { this.audioFiles = []; this.audioNote = e.message; }
+      } catch (e) { this[key + "Files"] = []; this[key + "Note"] = e.message; }
     },
     guessLang(name) {
       const stem = name.replace(/\.[^.]+$/, "").toLowerCase();
@@ -629,12 +636,12 @@ function app() {
         };
       }).filter(t => Object.keys(t.texts).length > 0);
       const audio_labels = {};
-      for (const a of this.voiceFiles) if (a.lang) audio_labels[a.name] = a.lang;
+      for (const a of [...this.appliedVoice, ...this.appliedMusic]) if (a.lang) audio_labels[a.name] = a.lang;
       return {
         input_dir: this.form.input_dir, output_dir: this.form.output_dir,
         segments: this.segmentPayload(),
-        music_files: this.musicFiles.map(a => a.path),
-        voice_files: this.voiceFiles.map(a => a.path),
+        music_files: this.appliedMusic.map(a => a.path),
+        voice_files: this.appliedVoice.map(a => a.path),
         audio_labels,
         keep_original: this.keepOriginal,
         volumes: { ...this.volumes },

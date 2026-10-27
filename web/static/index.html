@@ -199,34 +199,53 @@
 
       <!-- Audio -->
       <div x-show="tab === 'audio'" role="tabpanel">
-        <p class="hint">Chọn "Nhạc nền" hoặc "Voice" cho từng file. Voice có ngôn ngữ (lấy từ tên file, có thể đổi). Có thể dùng nhạc + voice cùng lúc.</p>
-        <div class="row">
-          <input class="input flex-1" aria-label="Thư mục audio" x-model.trim="form.audio_dir"
-                 placeholder="Thư mục chứa file audio (tuỳ chọn)">
-          <button class="btn" type="button" @click="pick('audio_dir')">Chọn…</button>
-        </div>
-        <div class="file-list" x-show="audioFiles.length > 0">
-          <template x-for="a in audioFiles" :key="a.path">
-            <div class="file-item">
-              <span class="file-icon" aria-hidden="true">🔈</span>
-              <span class="file-name" x-text="a.name"></span>
-              <div class="row-sm">
-                <button type="button" class="chip" :aria-pressed="a.kind === 'music'" :class="{ on: a.kind === 'music' }"
-                        @click="a.kind = 'music'">Nhạc nền</button>
-                <button type="button" class="chip" :aria-pressed="a.kind === 'voice'" :class="{ on: a.kind === 'voice' }"
-                        @click="a.kind = 'voice'">Voice</button>
-                <button type="button" class="chip" :aria-pressed="a.kind === 'none'" :class="{ on: a.kind === 'none' }"
-                        @click="a.kind = 'none'">Không dùng</button>
-                <select class="select select-sm" x-show="a.kind === 'voice'" :aria-label="'Ngôn ngữ của ' + a.name" x-model="a.lang">
-                  <option value="">Chưa nhận ra</option>
+        <p class="hint">Voice và nhạc nền là hai nguồn riêng, có thể bật cả hai cùng lúc. Mỗi nguồn chọn một thư mục.</p>
+
+        <div class="segment-card">
+          <label class="field-inline"><input type="checkbox" x-model="useVoice"> <strong>🎙 Áp dụng voice</strong></label>
+          <div class="row">
+            <input class="input flex-1" aria-label="Thư mục voice" x-model.trim="form.voice_dir"
+                   placeholder="Thư mục chứa file voice">
+            <button class="btn" type="button" @click="pick('voice_dir')">Chọn…</button>
+          </div>
+          <p class="file-meta" x-show="voiceNote" x-text="voiceNote"></p>
+          <div class="file-list" x-show="voiceFiles.length > 0">
+            <template x-for="a in voiceFiles" :key="a.path">
+              <div class="file-item">
+                <span class="file-icon" aria-hidden="true">🎙</span>
+                <span class="file-name" x-text="a.name"></span>
+                <select class="select select-sm" :aria-label="'Ngôn ngữ của voice ' + a.name" x-model="a.lang">
+                  <option value="">Chưa chọn ngôn ngữ</option>
                   <template x-for="l in languageOptions" :key="l"><option :value="l" x-text="l.toUpperCase()"></option></template>
                 </select>
               </div>
-            </div>
-          </template>
+            </template>
+          </div>
+          <p class="warn" x-show="useVoice && voiceFiles.some(a => !a.lang)">Voice bắt buộc có ngôn ngữ — hãy chọn ngôn ngữ cho từng file.</p>
         </div>
-        <p class="warn" x-show="audioNote" x-text="audioNote"></p>
-        <p class="warn" x-show="voiceFiles.some(a => !a.lang)">Có voice chưa nhận ra ngôn ngữ — hãy chọn ngôn ngữ trước khi chạy.</p>
+
+        <div class="segment-card">
+          <label class="field-inline"><input type="checkbox" x-model="useMusic"> <strong>🎵 Áp dụng nhạc nền</strong></label>
+          <div class="row">
+            <input class="input flex-1" aria-label="Thư mục nhạc nền" x-model.trim="form.music_dir"
+                   placeholder="Thư mục chứa file nhạc nền">
+            <button class="btn" type="button" @click="pick('music_dir')">Chọn…</button>
+          </div>
+          <p class="file-meta" x-show="musicNote" x-text="musicNote"></p>
+          <div class="file-list" x-show="musicFiles.length > 0">
+            <template x-for="a in musicFiles" :key="a.path">
+              <div class="file-item">
+                <span class="file-icon" aria-hidden="true">🎵</span>
+                <span class="file-name" x-text="a.name"></span>
+                <select class="select select-sm" :aria-label="'Ngôn ngữ của nhạc ' + a.name" x-model="a.lang">
+                  <option value="">Không ngôn ngữ</option>
+                  <template x-for="l in languageOptions" :key="l"><option :value="l" x-text="l.toUpperCase()"></option></template>
+                </select>
+              </div>
+            </template>
+          </div>
+          <p class="file-meta">Ngôn ngữ nhạc nền là tuỳ chọn, chỉ dùng để ghép vào tên file khi không có ngôn ngữ nào khác.</p>
+        </div>
 
         <div class="audio-mix">
           <label class="field-inline"><input type="checkbox" x-model="keepOriginal"> Giữ audio gốc của video</label>
