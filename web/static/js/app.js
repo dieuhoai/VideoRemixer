@@ -10,7 +10,7 @@ const EFFECTS = [
   { id: "wipe_tb", label: "Wipe ↓", icon: "⬇️" },
   { id: "wipe_bt", label: "Wipe ↑", icon: "⬆️" },
 ];
-const LANGS = ["vi", "en", "es", "pt", "fr", "de", "ja", "ko", "zh", "th", "id", "ar", "ru", "it", "tr"];
+const LANGS = ["ar", "bn", "da", "de", "en", "es", "fi", "fr", "hi", "id", "is", "it", "ja", "km", "ko", "lo", "mr", "ms", "my", "nl", "no", "pl", "pt", "ru", "sv", "th", "tl", "tr", "ur", "vi", "zh"];
 const GEOS = ["WW", "VN", "US", "BR", "JP", "KR", "TH", "ID", "DE", "FR", "ES", "MX", "IN", "PH", "TW"];
 const SEG_LABEL = { intro: "Intro", custom: "Tuỳ chọn", outro: "Outro" };
 

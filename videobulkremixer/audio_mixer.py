@@ -41,9 +41,10 @@ def replace_audio(
     return note
 
 
+# Bảng mã ngôn ngữ theo quy ước đặt tên của Team (30 mã) + ru (Nga, giữ theo yêu cầu).
 LANGUAGES = [
-    "vi", "en", "es", "pt", "fr", "de", "ja", "ko", "zh",
-    "th", "id", "ar", "ru", "it", "tr", "pl", "nl", "sv", "hi", "ms", "tl",
+    "ar", "bn", "da", "de", "en", "es", "fi", "fr", "hi", "id", "is", "it", "ja", "km", "ko", "lo",
+    "mr", "ms", "my", "nl", "no", "pl", "pt", "ru", "sv", "th", "tl", "tr", "ur", "vi", "zh",
 ]
 
 
