@@ -73,6 +73,7 @@ function app() {
 
     tab: "source",
     audioFiles: [],
+    audioNote: "",
     keepOriginal: false,
     volumes: { music: 100, voice: 100, original: 100 },
     duckMusic: false,
@@ -267,7 +268,10 @@ function app() {
           const lang = this.guessLang(f.name);
           return { name: f.name, path: f.path, lang, kind: lang ? "voice" : "music" };
         });
-      } catch (e) { this.audioFiles = []; }
+        this.audioNote = d.error || (this.audioFiles.length === 0
+          ? "Không thấy file audio trong thư mục này (mp3, wav, m4a, aac, ogg, flac, opus, wma, aif). Kiểm tra lại đường dẫn, file có nằm trong thư mục con không."
+          : "");
+      } catch (e) { this.audioFiles = []; this.audioNote = e.message; }
     },
     guessLang(name) {
       const stem = name.replace(/\.[^.]+$/, "").toLowerCase();
