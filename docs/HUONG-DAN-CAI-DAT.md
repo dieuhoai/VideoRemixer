@@ -146,16 +146,29 @@ Nếu hiện dòng `ffmpeg version ...` là đã sẵn sàng. Nếu hiện `kill
 
 ## Phần D: Dùng nhanh tool (áp dụng cho cả hai máy)
 
-Giao diện có 4 khu vực. Làm theo thứ tự:
+Giao diện có 4 khu vực. Làm theo thứ tự.
+
+![Toàn bộ giao diện](images/giao-dien-tong-quan.png)
 
 1. **Video gốc:** bấm **Chọn thư mục…** và chọn thư mục chứa video gốc. Bấm vào một video để xem trước.
+
+   ![Khu vực 1 - Video gốc](images/khu-vuc-1-video-goc.png)
+
 2. **Chọn đoạn cần thay:** tích Intro, Tuỳ chọn hoặc Outro. Ô nào không hợp lệ sẽ báo đỏ.
+
+   ![Khu vực 2 - Chọn đoạn](images/khu-vuc-2-chon-doan.png)
+
 3. **Source, audio, text:** chọn thư mục clip thay thế, audio và chữ cần thay (nếu có).
+
+   ![Khu vực 3 - Source, audio, text](images/khu-vuc-3-source-audio-text.png)
+
 4. **Đặt tên, chạy và kết quả:**
    - Điền tên app, concept, geo, ngày. Khung **Xem trước tên file** cho biết tên file sẽ được đặt.
    - Chọn thư mục đầu ra.
    - Bấm **🧪 Chạy thử 1 video** trước. Khi xong, bấm **Xem** ở dòng kết quả để kiểm tra.
    - Nếu ổn, bấm **🚀 Lưu cả lô** để chạy toàn bộ.
+
+   ![Khu vực 4 - Chạy và kết quả](images/khu-vuc-4-chay-ket-qua.png)
 
 **Mẹo để chạy nhanh hơn:**
 - Chạy thử trước để tránh phải làm lại cả lô.
