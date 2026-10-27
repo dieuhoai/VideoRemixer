@@ -1,6 +1,6 @@
 # Nhật ký thay đổi
 
-## [Unreleased]
+## [0.2.1]
 
 ### Sửa lỗi
 - Hiệu ứng chuyển cảnh giờ được áp đúng mối nối; trước đây giao diện gửi sai khoá nên hiệu ứng bị bỏ qua.
