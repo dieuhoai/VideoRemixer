@@ -1,6 +1,8 @@
 # Hướng dẫn cài đặt và chạy Video Bulk Remixer
 
-Tài liệu này dành cho người không rành máy tính. Làm lần lượt từng bước, trong mỗi bước có ghi rõ nên làm gì nếu gặp lỗi.
+Tài liệu này dành cho người không rành máy tính.
+
+> Các hình minh hoạ các bước cài đặt là hình vẽ đơn giản để dễ hình dung, không phải ảnh chụp màn hình. Giao diện thực tế trên máy bạn có thể khác chút ít, nhưng tên nút và file cần tìm vẫn giống. Làm lần lượt từng bước, trong mỗi bước có ghi rõ nên làm gì nếu gặp lỗi.
 
 Tool chạy hoàn toàn trên máy của bạn, không gửi video lên mạng. Bạn chỉ cần cài một lần, các lần sau nhấp đúp là mở được.
 
@@ -22,6 +24,8 @@ Bạn sẽ dùng thư mục `VideoRemixer-main` (hoặc `VideoRemixer-main 2` n�
 ## Phần B: Hướng dẫn cho macOS
 
 ### Bước B1. Tải và giải nén tool
+
+![Thư mục sau khi giải nén](images/huong-dan/b1-thu-muc.png)
 1. Tải file `VideoRemixer-main.zip` (từ GitHub hoặc file được gửi).
 2. Nhấp đúp file zip để giải nén. Bạn sẽ có thư mục `VideoRemixer-main` trong **Downloads**.
 3. Nếu máy đã có thư mục cũ, đổi tên hoặc xoá thư mục cũ trước. Nếu có file ffmpeg cũ trong thư mục `bin`, hãy chép ra chỗ khác để dùng lại.
@@ -44,10 +48,13 @@ Bạn sẽ dùng thư mục `VideoRemixer-main` (hoặc `VideoRemixer-main 2` n�
 **Nếu lỗi:** Nếu không có bản 3.12, có thể bạn đã cài nhầm. Cài thêm 3.12 không làm mất bản đang có.
 
 ### Bước B4. Cài chứng chỉ bảo mật cho Python
+
+![Mở Install Certificates.command](images/huong-dan/b2-chung-chi-mac.png)
 Đây là bước bắt buộc với bản Python từ python.org, nếu bỏ qua thì bước tải ffmpeg sẽ báo lỗi `CERTIFICATE_VERIFY_FAILED`.
 
 1. Mở Finder, vào **Applications** (Ứng dụng) → thư mục **Python 3.12**.
 2. Nhấp đúp file **Install Certificates.command**. Chờ cửa sổ Terminal chạy xong và tự đóng.
+
 
 ### Bước B5. Cài Rosetta (chỉ với chip Apple)
 Bỏ qua bước này nếu máy là Intel.
@@ -59,10 +66,15 @@ softwareupdate --install-rosetta --agree-to-license
 Nếu hiện thông báo đã cài rồi thì không sao. Lệnh này có thể mất vài phút.
 
 ### Bước B6. Tải ffmpeg và ffprobe
+
+![Thư mục bin đúng và sai](images/huong-dan/b4-thu-muc-bin.png)
 Có hai cách, chọn một.
 
 **Cách 1 (tự động, khuyên dùng với Intel):**
+
 1. Mở Terminal, gõ `cd ` (có dấu cách cuối), kéo thư mục tool (VideoRemixer-main) vào cửa sổ Terminal rồi Enter.
+
+![Lệnh cd trong Terminal](images/huong-dan/b3-terminal-mac.png)
 2. Gõ:
    ```
    python3.12 -m venv .venv && .venv/bin/python -m pip install --upgrade pip && .venv/bin/python -m pip install . && .venv/bin/python scripts/fetch_ffmpeg.py
@@ -90,7 +102,10 @@ Trong Terminal (đang ở thư mục tool), gõ:
 Nếu hiện dòng `ffmpeg version ...` là đã sẵn sàng. Nếu hiện `killed` hoặc `Bad CPU type`, quay lại bước B5 hoặc chọn bản đúng với chip của máy.
 
 ### Bước B8. Chạy tool
+
 1. Nhấp đúp file **RUN-Mac.command** trong thư mục tool.
+
+![Dòng thành công](images/huong-dan/d1-thanh-cong.png)
 2. Lần đầu sẽ cài thư viện khoảng vài phút. Đợi đến khi thấy dòng:
    `Video Bulk Remixer đang chạy: http://127.0.0.1:8765/?t=...`
 3. Copy nguyên dòng link đó, dán vào Safari hoặc Chrome để mở giao diện.
@@ -114,6 +129,8 @@ Nếu hiện dòng `ffmpeg version ...` là đã sẵn sàng. Nếu hiện `kill
 ### Bước C2. Cài Python 3.12
 1. Vào https://www.python.org/downloads/windows/ và tải **Python 3.12.x** (installer 64-bit).
 2. Mở file vừa tải. **Quan trọng:** tích ô **Add python.exe to PATH** ở dưới cùng cửa sổ đầu tiên.
+
+![Ô Add python.exe to PATH](images/huong-dan/c1-python-path.png)
 3. Chọn **Install Now**, đợi xong.
 4. Kiểm tra: mở **Command Prompt** (tìm `cmd` trong Start), gõ `py -3.12 --version`. Kết quả phải là `Python 3.12.x`.
 
@@ -135,6 +152,8 @@ Nếu hiện dòng `ffmpeg version ...` là đã sẵn sàng. Nếu hiện `kill
 
 ### Bước C4. Chạy tool
 1. Nhấp đúp file **RUN-Windows.bat** trong thư mục tool.
+
+![Nhấp đúp RUN-Windows.bat](images/huong-dan/c2-chay-bat.png)
 2. Nếu Windows hỏi quyền truy cập, chọn **Yes** hoặc **Cho phép**.
 3. Lần đầu sẽ cài thư viện khoảng vài phút. Đợi đến khi thấy dòng `Video Bulk Remixer đang chạy: http://127.0.0.1:8765/?t=...`.
 4. Copy link đó, dán vào Chrome hoặc Edge.
