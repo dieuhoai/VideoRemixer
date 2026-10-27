@@ -30,39 +30,51 @@ def join_with_transitions(
         return _concat_copy(parts, output, cancel, keep_audio)
 
     durs = [get_duration(p) for p in parts]
+    # Độ chồng lấn của từng mối nối (giây): hiệu ứng chỉ áp cho hình, tiếng cắt thẳng tại mốc nối
+    overlaps: list[float] = []
+    total = durs[0]
+    for i in range(1, len(parts)):
+        cfg = cfgs[i - 1]
+        if cfg.transition_type == TransitionType.NONE:
+            overlaps.append(0.0)
+            total += durs[i]
+        else:
+            d = max(0.05, min(cfg.duration_sec, total / 2, durs[i] / 2))
+            overlaps.append(d)
+            total += durs[i] - d
     inputs: list[str] = []
     for p in parts:
         inputs += ["-i", str(p)]
     graph: list[str] = []
     cur = "0:v"
-    acur = "0:a"
     total = durs[0]
     for i in range(1, len(parts)):
         nxt = f"{i}:v"
-        anxt = f"{i}:a"
         label = f"v{i}"
-        alabel = f"a{i}"
         cfg = cfgs[i - 1]
+        d = overlaps[i - 1]
         if cfg.transition_type == TransitionType.NONE:
             graph.append(f"[{cur}][{nxt}]concat=n=2:v=1:a=0[{label}]")
-            if keep_audio:
-                graph.append(f"[{acur}][{anxt}]concat=n=2:v=0:a=1[{alabel}]")
             total += durs[i]
         else:
-            d = max(0.05, min(cfg.duration_sec, total / 2, durs[i] / 2))
             offset = max(0.0, total - d)
             name = XFADE_MAP[cfg.transition_type]
             graph.append(f"[{cur}][{nxt}]xfade=transition={name}:duration={d:.3f}:offset={offset:.3f}[{label}]")
-            if keep_audio:
-                graph.append(f"[{acur}][{anxt}]acrossfade=d={d:.3f}:c1=tri:c2=tri[{alabel}]")
             total += durs[i] - d
         cur = label
-        acur = alabel
     graph.append(f"[{cur}]format=yuv420p[vout]")
     maps = ["-map", "[vout]"]
     audio_args: list[str] = ["-an"]
     if keep_audio:
-        maps += ["-map", f"[{acur}]"]
+        # Tiếng: mỗi đoạn bỏ phần chồng lấn ở cuối (nếu có), rồi nối cắt thẳng — không fade âm thanh
+        pieces: list[str] = []
+        for i, dur in enumerate(durs):
+            out_cut = overlaps[i] if i < len(overlaps) else 0.0
+            keep_len = max(0.01, dur - out_cut)
+            pieces.append(f"[{i}:a]atrim=0:{keep_len:.3f},asetpts=PTS-STARTPTS[pa{i}]")
+        joined = "".join(f"[pa{i}]" for i in range(len(parts)))
+        graph.append(";".join(pieces) + f";{joined}concat=n={len(parts)}:v=0:a=1[aout]")
+        maps += ["-map", "[aout]"]
         audio_args = ["-c:a", "aac", "-b:a", "192k"]
     run_ffmpeg([
         *inputs, "-filter_complex", ";".join(graph), *maps,
