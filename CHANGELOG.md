@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Added
+- Nút **Chạy thử 1 video**: xử lý đúng một video gốc, lưu vào thư mục `_xem_thu` để kiểm tra trước khi bấm **Lưu cả lô**.
+
+### Changed
+- Lưu thành phẩm nhanh hơn: cùng ổ đĩa thì tạo liên kết thay vì sao chép toàn bộ file video.
+
 ### Fixed
 - Trình khởi động (RUN-Mac.command, RUN-Windows.bat): tự tìm Python 3.10 trở lên, cài thư viện đúng cách, báo lỗi rõ ràng thay vì báo "Xong!" khi cài thất bại.
 

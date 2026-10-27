@@ -324,10 +324,16 @@
       </div>
 
       <div class="row mt">
-        <button class="btn btn-primary btn-lg" type="button" @click="startJob()"
-                x-show="job.status !== 'running'" :disabled="!canRun || busy">🚀 Chạy</button>
+        <button class="btn btn-lg" type="button" @click="startJob(true)"
+                x-show="job.status !== 'running'" :disabled="!canRun || busy">🧪 Chạy thử 1 video</button>
+        <button class="btn btn-primary btn-lg" type="button" @click="startJob(false)"
+                x-show="job.status !== 'running'" :disabled="!canRun || busy">🚀 Lưu cả lô</button>
         <button class="btn btn-danger btn-lg" type="button" x-show="job.status === 'running'" @click="stopJob()">⏹ Dừng</button>
       </div>
+      <p class="hint mt" x-show="lastPreview && job.status !== 'running'" role="status">
+        Đây là bản chạy thử (lưu trong thư mục _xem_thu). Bấm <strong>Xem</strong> ở bảng kết quả để kiểm tra.
+        Nếu ổn, bấm <strong>🚀 Lưu cả lô</strong>.
+      </p>
 
       <div class="progress-section" x-show="job.status === 'running' || job.status === 'stopped' || job.status === 'error' || job.status === 'done'" aria-live="polite">
         <h3 class="sub" x-text="statusTitle"></h3>

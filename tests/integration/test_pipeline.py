@@ -140,3 +140,18 @@ def test_cancel_stops_batch_and_keeps_finished_files(media, tmp_path):
     assert res.cancelled
     assert res.ok_count >= 1
     assert not list((tmp_path / "out").rglob(".*.part"))
+
+
+def test_preview_run_makes_exactly_one_output(media, tmp_path):
+    """Chạy thử: chỉ 1 video gốc × 1 tổ hợp × 1 ngôn ngữ, ghi ra thư mục chạy thử."""
+    preview_dir = tmp_path / "out" / "_xem_thu"
+    cfg = JobConfig(
+        input_dir=media / "orig", output_dir=preview_dir,
+        segments=[SegmentConfig(SegmentType.INTRO, 0, 5, media / "intro")],
+        naming=_naming(),
+    )
+    result = Pipeline(cfg, preview=True).run()
+    assert len(result.items) == 1
+    assert result.items[0].ok
+    outputs = [p for p in preview_dir.rglob("*.mp4")]
+    assert len(outputs) == 1

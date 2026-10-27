@@ -81,14 +81,35 @@ def _friendly(exc: Exception) -> str:
     return f"lỗi không xác định: {str(exc)[:160]}"
 
 
+def place_file(src: Path, target: Path) -> None:
+    """Đặt file src thành target (target chưa tồn tại).
+
+    Ưu tiên liên kết cứng: cùng ổ đĩa thì không sao chép dữ liệu nên nhanh hơn nhiều.
+    Không được (khác ổ, ổ FAT/exFAT...) thì sao chép như cũ.
+    """
+    tmp = target.with_name(f".{target.name}.part")
+    tmp.unlink(missing_ok=True)
+    try:
+        try:
+            os.link(src, tmp)
+        except OSError:
+            shutil.copyfile(src, tmp)
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 class Pipeline:
     def __init__(
         self,
         config: JobConfig,
         on_progress: Callable[[int, int, str], None] | None = None,
         short_source_action: str = "trim",  # "trim" = co đoạn theo source, "skip" = giữ nguyên đoạn gốc
+        preview: bool = False,  # True = chỉ chạy thử 1 video gốc, 1 tổ hợp, 1 ngôn ngữ
     ) -> None:
         self.config = config
+        self.preview = preview
         self.on_progress = on_progress
         self.short_source_action = short_source_action
         self._cancel = threading.Event()
@@ -150,6 +171,8 @@ class Pipeline:
         originals = list_videos(cfg.input_dir)
         plan = build_output_plan(cfg)
         combos = build_source_combos(cfg)
+        if self.preview:
+            originals, combos, plan = originals[:1], combos[:1], plan[:1]
         total = len(originals) * len(combos) * len(plan)
         current = 0
         with tempfile.TemporaryDirectory(prefix="vbr_") as tmp:
@@ -311,12 +334,9 @@ class Pipeline:
                 break
             stt += 1
         self._stt[folder_name] = stt
-        tmp = folder / f".{name}.part"
         try:
-            shutil.copyfile(src, tmp)
-            os.replace(tmp, target)
+            place_file(src, target)
         except OSError as e:
-            tmp.unlink(missing_ok=True)
             if e.errno == errno.ENOSPC:
                 raise DiskFull() from e
             raise

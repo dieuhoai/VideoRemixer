@@ -83,6 +83,7 @@ function app() {
 
     job: { status: "idle", done: 0, total: 0, current: "", ok: 0, outputs: [], failed: [], error: "", output_dir: "" },
     outPreview: null,
+    lastPreview: false,
     shortWarnings: [],
     shortAction: "trim",
     shownShortFor: "",
@@ -436,7 +437,7 @@ function app() {
         short_source: this.shortAction,
       };
     },
-    async startJob() {
+    async startJob(preview = false) {
       if (!this.canRun || this.busy) return;
       this.busy = true;
       this.message = "";
@@ -451,7 +452,8 @@ function app() {
           this.message = "Có source ngắn hơn đoạn cần thay. Chọn cách xử lý bên dưới rồi bấm Chạy lần nữa.";
           return;
         }
-        await api("POST", "/api/jobs", body);
+        await api("POST", "/api/jobs", preview ? { ...body, preview: true } : body);
+        this.lastPreview = preview;
         this.outPreview = null;
         this.shownShortFor = "";
         await this.refreshJob();

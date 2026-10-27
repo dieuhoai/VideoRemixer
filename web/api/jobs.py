@@ -119,6 +119,9 @@ def naming(body: dict) -> dict:
     return {"names": names}
 
 
+PREVIEW_DIR_NAME = "_xem_thu"
+
+
 @router.post("")
 def start(body: dict) -> dict:
     cfg = _parse_or_422(body)
@@ -133,7 +136,11 @@ def start(body: dict) -> dict:
     if short not in ("trim", "skip"):
         STATE.busy.release()
         raise HTTPException(422, "Lựa chọn source ngắn không hợp lệ")
-    pipe = Pipeline(cfg, on_progress=_progress, short_source_action=short)
+    preview = bool(body.get("preview", False))
+    if preview:
+        # Chạy thử: ghi vào thư mục riêng để xem trước, không lẫn với thành phẩm
+        cfg.output_dir = cfg.output_dir / PREVIEW_DIR_NAME
+    pipe = Pipeline(cfg, on_progress=_progress, short_source_action=short, preview=preview)
     STATE.pipeline = pipe
     total = len(list_videos(cfg.input_dir))
     STATE.update(status="running", done=0, total=total, current="", ok=0, failed=[], outputs=[],
