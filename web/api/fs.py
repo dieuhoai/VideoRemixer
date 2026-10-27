@@ -137,7 +137,7 @@ def frame_with_text(body: dict) -> Response:
         t = min(max(float(body.get("t", 0) or 0), 0.0), max(info.duration - 0.05, 0.0))
         replacements = parse_texts(body.get("regions") or [])
         frame = decode_frame(p, t, w_even, h_even)
-        out = render_text_on_frame(frame, replacements, lang)
+        out = render_text_on_frame(frame, replacements, lang, t=t)
     except FFmpegError as e:
         raise HTTPException(422, str(e)) from e
     except (KeyError, ValueError, TypeError) as e:
@@ -174,7 +174,7 @@ def clip_with_text(body: dict) -> Response:
         )
         if r.returncode != 0:
             raise FFmpegError("không cắt được đoạn xem trước")
-        res = replace_text_on_video(clip, replacements, lang, work / "text.mp4")
+        res = replace_text_on_video(clip, replacements, lang, work / "text.mp4", time_offset=start)
         if res.output is None:
             raise HTTPException(422, "Chưa có text nào cho ngôn ngữ này")
         final = work / "preview.mp4"

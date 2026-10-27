@@ -2,13 +2,20 @@
 "use strict";
 
 const EFFECTS = [
-  { id: "crossfade", label: "Crossfade", icon: "🌊" },
-  { id: "fade_black", label: "Fade to black", icon: "⬛" },
-  { id: "fade_white", label: "Fade to white", icon: "⬜" },
-  { id: "slide_lr", label: "Slide →", icon: "➡️" },
-  { id: "slide_rl", label: "Slide ←", icon: "⬅️" },
-  { id: "wipe_tb", label: "Wipe ↓", icon: "⬇️" },
-  { id: "wipe_bt", label: "Wipe ↑", icon: "⬆️" },
+  { id: "crossfade", label: "Mờ dần (Crossfade)", icon: "🌊" },
+  { id: "dissolve", label: "Hoà tan (Dissolve)", icon: "✨" },
+  { id: "fade_black", label: "Qua đen", icon: "⬛" },
+  { id: "fade_white", label: "Qua trắng", icon: "⬜" },
+  { id: "slide_lr", label: "Trượt sang phải", icon: "➡️" },
+  { id: "slide_rl", label: "Trượt sang trái", icon: "⬅️" },
+  { id: "slide_up", label: "Trượt lên", icon: "⬆️" },
+  { id: "slide_down", label: "Trượt xuống", icon: "⬇️" },
+  { id: "wipe_lr", label: "Quét sang phải", icon: "▶️" },
+  { id: "wipe_rl", label: "Quét sang trái", icon: "◀️" },
+  { id: "wipe_tb", label: "Quét xuống", icon: "🔽" },
+  { id: "wipe_bt", label: "Quét lên", icon: "🔼" },
+  { id: "circle_open", label: "Nở tròn", icon: "⭕" },
+  { id: "zoom_in", label: "Phóng to", icon: "🔍" },
 ];
 const LANGS = ["ar", "bn", "da", "de", "en", "es", "fi", "fr", "hi", "id", "is", "it", "ja", "km", "ko", "lo", "mr", "ms", "my", "nl", "no", "pl", "pt", "ru", "sv", "th", "tl", "tr", "ur", "vi", "zh"];
 const GEOS = ["WW", "VN", "US", "BR", "JP", "KR", "TH", "ID", "DE", "FR", "ES", "MX", "IN", "PH", "TW"];
@@ -66,6 +73,11 @@ function app() {
 
     tab: "source",
     audioFiles: [],
+    keepOriginal: false,
+    volumes: { music: 100, voice: 100, original: 100 },
+    duckMusic: false,
+    tiltFor: null,
+    cornerDrag: null,
     textLangs: ["vi", "en"],
     newLang: "",
     textRegions: [],
@@ -116,8 +128,11 @@ function app() {
     get referenceDuration() {
       return (this.preview && this.preview.duration) || (this.firstVideo && this.firstVideo.duration) || 0;
     },
+    get musicFiles() { return this.audioFiles.filter(a => a.kind === "music"); },
+    get voiceFiles() { return this.audioFiles.filter(a => a.kind === "voice"); },
+    get hasAudioWork() { return this.musicFiles.length > 0 || this.voiceFiles.length > 0 || this.keepOriginal; },
     get planLanguages() {
-      const langs = new Set(this.audioFiles.map(a => a.lang).filter(Boolean));
+      const langs = new Set(this.voiceFiles.map(a => a.lang).filter(Boolean));
       for (const r of this.textRegions) {
         for (const l of this.textLangs) if ((r.texts[l] || "").trim()) langs.add(l);
       }
@@ -125,9 +140,12 @@ function app() {
     },
     get planCount() {
       const langs = this.planLanguages;
-      if (langs.length === 0) return 1;
+      const music = Math.max(1, this.musicFiles.length);
+      if (langs.length === 0) return music;
       let n = 0;
-      for (const l of langs) n += Math.max(1, this.audioFiles.filter(a => a.lang === l).length);
+      for (const l of langs) {
+        n += Math.max(1, this.voiceFiles.filter(a => a.lang === l).length) * music;
+      }
       return n;
     },
     get sourceCombos() {
@@ -146,7 +164,7 @@ function app() {
       if (!this.form.output_dir) r.push("Chọn thư mục Output (ô 4)");
       if (this.form.output_dir && this.form.output_dir === this.form.input_dir) r.push("Output không được trùng thư mục video gốc");
       if (this.overlapError) r.push("Các đoạn đang chồng lên nhau");
-      if (this.activeSegments.length === 0 && this.audioFiles.length === 0 && !this.hasTextWork) {
+      if (this.activeSegments.length === 0 && !this.hasAudioWork && !this.hasTextWork) {
         r.push("Chưa chọn việc gì để thay (đoạn, audio hoặc text)");
       }
       for (const s of this.activeSegments) {
@@ -245,7 +263,10 @@ function app() {
     async scanAudio(dir) {
       try {
         const d = await api("GET", "/api/fs/list?kind=audio&dir=" + encodeURIComponent(dir));
-        this.audioFiles = (d.files || []).map(f => ({ name: f.name, path: f.path, lang: this.guessLang(f.name) }));
+        this.audioFiles = (d.files || []).map(f => {
+          const lang = this.guessLang(f.name);
+          return { name: f.name, path: f.path, lang, kind: lang ? "voice" : "music" };
+        });
       } catch (e) { this.audioFiles = []; }
     },
     guessLang(name) {
@@ -309,10 +330,7 @@ function app() {
       const lang = this.frameLang || this.textLangs[0] || "";
       if (!src) { this.message = "Hãy chọn một video để xem trước."; return; }
       if (!lang) { this.message = "Chưa có ngôn ngữ để xem text."; return; }
-      const regions = this.textRegions
-        .filter(r => (r.texts[lang] || "").trim())
-        .map(r => ({ name: r.name, texts: { [lang]: r.texts[lang] },
-          region: { x: r.x, y: r.y, width: r.width, height: r.height }, style: r.style }));
+      const regions = this.regionDtos(lang);
       if (regions.length === 0) { this.message = "Chưa điền text mới cho ngôn ngữ " + lang.toUpperCase() + "."; return; }
       const t = Math.max(0, Number(this.frameAt) || 0);
       this.textPreviewBusy = true;
@@ -415,6 +433,13 @@ function app() {
       else if (k === "slide_rl") { g.fillRect(W - q * W, 0, W, H); }
       else if (k === "wipe_tb") { g.fillRect(0, 0, W, q * H); }
       else if (k === "wipe_bt") { g.fillRect(0, H - q * H, W, q * H); }
+      else if (k === "dissolve") { g.globalAlpha = Math.min(1, q); g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
+      else if (k === "slide_up") { g.fillRect(0, H - q * H, W, H); }
+      else if (k === "slide_down") { g.fillRect(0, -H + q * H, W, H); }
+      else if (k === "wipe_lr") { g.fillRect(0, 0, q * W, H); }
+      else if (k === "wipe_rl") { g.fillRect(W - q * W, 0, q * W, H); }
+      else if (k === "circle_open") { g.beginPath(); g.arc(W / 2, H / 2, q * Math.hypot(W, H) / 2, 0, Math.PI * 2); g.fill(); }
+      else if (k === "zoom_in") { const s = 1 + q; g.fillRect(W / 2 - W * s / 2, H / 2 - H * s / 2, W * s, H * s); }
       g.fillStyle = "#fff"; g.font = "600 14px system-ui"; g.fillText("Xem trước hiệu ứng", 10, 22);
     },
 
@@ -441,10 +466,7 @@ function app() {
       const src = this.preview || this.firstVideo;
       const lang = this.frameLang || this.textLangs[0] || "";
       const seq = ++this.renderSeq;
-      const regions = this.textRegions
-        .filter(r => (r.texts[lang] || "").trim())
-        .map(r => ({ name: r.name, texts: { [lang]: r.texts[lang] },
-          region: { x: r.x, y: r.y, width: r.width, height: r.height }, style: r.style }));
+      const regions = this.regionDtos(lang);
       if (!src || !this.frameUrl || !lang || regions.length === 0) {
         this.frameRenderUrl = "";
         return;
@@ -475,6 +497,7 @@ function app() {
       this.drawing = true;
     },
     boxMove(e) {
+      if (this.cornerDrag) { this.moveCorner(e); return; }
       if (!this.drawing) return;
       const img = this.$refs.frame;
       const b = img.getBoundingClientRect();
@@ -484,6 +507,11 @@ function app() {
         w: Math.abs(x - this.drawFrom.x), h: Math.abs(y - this.drawFrom.y) };
     },
     boxEnd() {
+      if (this.cornerDrag) {
+        this.cornerDrag = null;
+        this.renderFrame();
+        return;
+      }
       if (!this.drawing) return;
       this.drawing = false;
       const img = this.$refs.frame;
@@ -496,10 +524,70 @@ function app() {
         x: Math.round(this.drawRect.x * k), y: Math.round(this.drawRect.y * k),
         width: Math.round(this.drawRect.w * k), height: Math.round(this.drawRect.h * k),
         texts,
+        start: 0,
+        end: "",
+        points: null,
         style: { font: "Fira Sans", size: 48, color: "#FFFFFF", bold: false, align: "center", shadow: false,
                  stroke_width: 0, stroke_color: "#000000" },
       });
       this.drawRect = null;
+    },
+    regionDtos(lang) {
+      return this.textRegions
+        .filter(r => (r.texts[lang] || "").trim())
+        .map(r => this.regionDto(r, lang));
+    },
+    regionDto(r, lang) {
+      return {
+        name: r.name, texts: { [lang]: r.texts[lang] },
+        region: { x: r.x, y: r.y, width: r.width, height: r.height, points: r.points || [] },
+        style: r.style, start: Number(r.start) || 0, end: this.endValue(r),
+      };
+    },
+    endValue(r) {
+      return r.end === "" || r.end == null ? null : Number(r.end);
+    },
+    toggleTilt(ri) {
+      if (this.tiltFor === ri) { this.tiltFor = null; return; }
+      const r = this.textRegions[ri];
+      if (!r) return;
+      if (!r.points) {
+        r.points = [[r.x, r.y], [r.x + r.width, r.y], [r.x + r.width, r.y + r.height], [r.x, r.y + r.height]];
+      }
+      this.tiltFor = ri;
+    },
+    clearTilt(ri) {
+      const r = this.textRegions[ri];
+      if (r) r.points = null;
+      if (this.tiltFor === ri) this.tiltFor = null;
+      this.renderFrame();
+    },
+    cornerStyle(ci) {
+      const r = this.tiltFor === null ? null : this.textRegions[this.tiltFor];
+      const img = this.$refs.frame;
+      if (!r || !r.points || !img || !this.frameW || !r.points[ci]) return "display:none";
+      const k = img.getBoundingClientRect().width / this.frameW;
+      return `left:${r.points[ci][0] * k}px;top:${r.points[ci][1] * k}px`;
+    },
+    startCorner(ci, e) {
+      this.cornerDrag = { ri: this.tiltFor, ci };
+      if (e.target && e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
+    },
+    moveCorner(e) {
+      const drag = this.cornerDrag;
+      const r = drag ? this.textRegions[drag.ri] : null;
+      const img = this.$refs.frame;
+      if (!r || !r.points || !img) return;
+      const b = img.getBoundingClientRect();
+      const k = this.frameW / b.width;
+      const x = Math.min(Math.max(e.clientX - b.left, 0), b.width) * k;
+      const y = Math.min(Math.max(e.clientY - b.top, 0), b.height) * k;
+      const pts = r.points.map(p => [...p]);
+      pts[drag.ci] = [Math.round(x), Math.round(y)];
+      r.points = pts;
+      const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+      r.x = Math.min(...xs); r.y = Math.min(...ys);
+      r.width = Math.max(...xs) - r.x; r.height = Math.max(...ys) - r.y;
     },
     regionStyle(r) {
       const img = this.$refs.frame;
@@ -531,14 +619,22 @@ function app() {
       const texts = this.textRegions.map(r => {
         const t = {};
         for (const l of this.textLangs) if ((r.texts[l] || "").trim()) t[l] = r.texts[l];
-        return { name: r.name, region: { x: r.x, y: r.y, width: r.width, height: r.height }, texts: t, style: r.style };
+        return {
+          name: r.name, region: { x: r.x, y: r.y, width: r.width, height: r.height, points: r.points || [] },
+          texts: t, style: r.style, start: Number(r.start) || 0, end: this.endValue(r),
+        };
       }).filter(t => Object.keys(t.texts).length > 0);
       const audio_labels = {};
-      for (const a of this.audioFiles) if (a.lang) audio_labels[a.name] = a.lang;
+      for (const a of this.voiceFiles) if (a.lang) audio_labels[a.name] = a.lang;
       return {
         input_dir: this.form.input_dir, output_dir: this.form.output_dir,
         segments: this.segmentPayload(),
-        audio_files: this.audioFiles.map(a => a.path), audio_labels,
+        music_files: this.musicFiles.map(a => a.path),
+        voice_files: this.voiceFiles.map(a => a.path),
+        audio_labels,
+        keep_original: this.keepOriginal,
+        volumes: { ...this.volumes },
+        duck_music: this.duckMusic,
         texts,
         transitions: this.transitions,
         default_transition: { type: "none", duration: 0.5 },

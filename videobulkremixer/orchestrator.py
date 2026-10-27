@@ -8,17 +8,24 @@ import shutil
 import tempfile
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from videobulkremixer.audio_mixer import guess_language_from_filename, replace_audio
+from videobulkremixer.audio_mixer import MixPlan, mix_audio
 from videobulkremixer.ff import Cancelled, DiskFull, FFmpegError, probe
-from videobulkremixer.models import ItemResult, JobConfig, JobResult, TextReplacement, TransitionType
+from videobulkremixer.models import (
+    ItemResult,
+    JobConfig,
+    JobResult,
+    TextReplacement,
+    TransitionConfig,
+    TransitionType,
+)
 from videobulkremixer.namer import generate_name
 from videobulkremixer.reporter import write_report
 from videobulkremixer.text_replacer import replace_text_on_video
 from videobulkremixer.timeline import Part, build_timeline, joint_labels
-from videobulkremixer.video_cutter import render_clip
+from videobulkremixer.video_cutter import get_duration, render_clip
 from videobulkremixer.video_joiner import join_with_transitions
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv"}
@@ -38,8 +45,10 @@ def list_videos(directory: Path) -> list[Path]:
 
 @dataclass(frozen=True)
 class OutputSpec:
-    lang: str  # "" = không có ngôn ngữ (dùng audio + text gốc)
-    audio: Path | None  # None = giữ audio gốc của video
+    lang: str  # "" = không có ngôn ngữ
+    music: Path | None  # nhạc nền (không có ngôn ngữ)
+    voice: Path | None  # voice thay thế (ngôn ngữ = lang)
+    keep_original: bool  # giữ tiếng và nhạc gốc của video
     texts: tuple[TextReplacement, ...] = ()
 
     @property
@@ -48,22 +57,70 @@ class OutputSpec:
 
 
 def build_output_plan(config: JobConfig) -> list[OutputSpec]:
-    """Mỗi ngôn ngữ = 1 bộ đầu ra. Audio và text cùng ngôn ngữ được ghép với nhau."""
-    audio_by_lang: dict[str, list[Path]] = {}
-    for af in config.audio.audio_files:
-        label = config.audio.language_labels.get(af.name) or guess_language_from_filename(af.name) or af.stem
-        audio_by_lang.setdefault(label, []).append(af)
-    langs = set(audio_by_lang)
+    """Mỗi ngôn ngữ = một nhóm đầu ra. Voice và text cùng ngôn ngữ được ghép lại; nhạc nền dùng chung."""
+    audio = config.audio
+    voices_by_lang: dict[str, list[Path]] = {}
+    for vf in audio.voice_files:
+        voices_by_lang.setdefault(audio.voice_language(vf), []).append(vf)
+    langs = {lang for lang in voices_by_lang if lang}
     for tr in config.text_replacements:
         langs.update(k for k, v in tr.texts_by_lang.items() if v and v.strip())
+    musics: list[Path | None] = list(audio.music_files) or [None]
     if not langs:
-        return [OutputSpec(lang="", audio=None)]
+        return [OutputSpec(lang="", music=m, voice=None, keep_original=audio.keep_original) for m in musics]
     plan: list[OutputSpec] = []
     for lang in sorted(langs):
         texts = tuple(tr for tr in config.text_replacements if (tr.texts_by_lang.get(lang) or "").strip())
-        for audio in audio_by_lang.get(lang) or [None]:
-            plan.append(OutputSpec(lang=lang, audio=audio, texts=texts))
+        voices: list[Path | None] = list(voices_by_lang.get(lang, [])) or [None]
+        for voice in voices:
+            for music in musics:
+                plan.append(OutputSpec(lang=lang, music=music, voice=voice,
+                                       keep_original=audio.keep_original, texts=texts))
     return plan
+
+
+def map_texts_to_output(
+    parts: list[Part],
+    part_durs: list[float],
+    joints: list[TransitionConfig],
+    texts: tuple[TextReplacement, ...] | list[TextReplacement],
+    orig_duration: float,
+) -> tuple[list[TextReplacement], bool]:
+    """Đổi mốc thời gian text (theo video gốc) sang mốc của video đã ghép.
+
+    Chỉ đoạn giữ nguyên từ gốc mới có text; đoạn thay thế (source) không được gắn text.
+    Trả về (danh sách đoạn text đã đổi mốc, có đoạn text nào rơi vào đoạn thay thế không).
+    """
+    starts: list[float] = []
+    total = 0.0
+    for i, d in enumerate(part_durs):
+        if i == 0:
+            starts.append(0.0)
+            total = d
+            continue
+        cfg = joints[i - 1]
+        ov = 0.0 if cfg.transition_type == TransitionType.NONE else max(0.05, min(cfg.duration_sec, total / 2, d / 2))
+        starts.append(total - ov)
+        total = total - ov + d
+    out: list[TextReplacement] = []
+    skipped = False
+    for tr in texts:
+        a = tr.start_sec
+        b = orig_duration if tr.end_sec is None else min(tr.end_sec, orig_duration)
+        covered = 0.0
+        for part, o_start, d in zip(parts, starts, part_durs, strict=True):
+            if part.kind != "keep":
+                continue
+            lo, hi = max(a, part.start), min(b, part.end)
+            if hi - lo <= 0.01:
+                continue
+            new_lo = o_start + (lo - part.start)
+            new_hi = min(o_start + d, o_start + (hi - part.start))
+            out.append(replace(tr, start_sec=new_lo, end_sec=new_hi))
+            covered += hi - lo
+        if b - a - covered > 0.05:
+            skipped = True
+    return out, skipped
 
 
 def build_source_combos(config: JobConfig) -> list[dict[str, Path | None]]:
@@ -138,8 +195,11 @@ class Pipeline:
         for seg in cfg.segments:
             if not list_videos(seg.source_dir):
                 raise ValueError(f"Thư mục source {SEG_NAME[seg.segment_type.value]} chưa có video nào")
-        if not (cfg.segments or cfg.audio.has_replacement or cfg.text_replacements):
-            raise ValueError("Chưa chọn việc gì để thay (đoạn, audio hoặc text)")
+        for vf in cfg.audio.voice_files:
+            if not cfg.audio.voice_language(vf):
+                raise ValueError(f"File voice '{vf.name}' chưa có ngôn ngữ. Hãy chọn ngôn ngữ cho file này.")
+        if not (cfg.segments or cfg.audio.has_replacement or cfg.audio.keep_original or cfg.text_replacements):
+            raise ValueError("Chưa chọn việc gì để thay (đoạn, audio, voice hoặc text)")
 
     def check_short_sources(self) -> list[dict]:
         """Các source ngắn hơn đoạn cần thay (tính theo video gốc đầu tiên)."""
@@ -235,8 +295,11 @@ class Pipeline:
         item_dir.mkdir()
         cancel = self.cancelled_check
         W, H = info.width - info.width % 2, info.height - info.height % 2
+        audio_names = [f.name for f in (spec.music, spec.voice) if f is not None]
+        if spec.keep_original:
+            audio_names.append("gốc")
         item = ItemResult(source_video=orig.name, duration_in=info.duration, language=spec.folder_lang,
-                          audio_file=spec.audio.name if spec.audio else "gốc")
+                          audio_file=" + ".join(audio_names) or "không có")
         notes: list[str] = []
         try:
             # 1. Dựng các đoạn hình: giữ gốc hoặc thay bằng source
@@ -276,19 +339,27 @@ class Pipeline:
             item.transition_used = ",".join(used)
             current = joined
 
-            # 3. Thay text theo ngôn ngữ
+            # 3. Thay text theo ngôn ngữ: mốc thời gian của text tính theo video gốc, đổi sang video đã ghép
             if spec.texts:
-                res = replace_text_on_video(current, list(spec.texts), spec.lang, item_dir / "text.mp4", cancel)
-                if res.output is not None:
+                part_durs = [get_duration(p) for p in parts]
+                mapped, skipped = map_texts_to_output(timeline, part_durs, joints, spec.texts, info.duration)
+                if skipped:
+                    notes.append("có đoạn text rơi vào đoạn thay thế nên không được thay")
+                res = (replace_text_on_video(current, mapped, spec.lang, item_dir / "text.mp4", cancel)
+                       if mapped else None)
+                if res is not None and res.output is not None:
                     current = res.output
                     item.text_replaced = True
-                if res.note:
-                    notes.append(res.note)
+                    if res.note:
+                        notes.append(res.note)
 
-            # 4. Audio: 1 track xuyên suốt (audio gốc hoặc audio thay thế)
+            # 4. Audio: nhạc nền + voice + tiếng gốc, mỗi nguồn một âm lượng
             final = item_dir / "final.mp4"
-            audio_src = spec.audio or orig
-            amsg = replace_audio(current, audio_src, final, cancel)
+            ac = cfg.audio
+            plan = MixPlan(music=spec.music, voice=spec.voice, keep_original=spec.keep_original,
+                           music_volume=ac.music_volume, voice_volume=ac.voice_volume,
+                           original_volume=ac.original_volume, duck_music=ac.duck_music)
+            amsg = mix_audio(current, plan, final, cancel)
             if amsg:
                 notes.append(amsg)
 
@@ -299,7 +370,7 @@ class Pipeline:
             item.duration_out = probe(str(out_path)).duration
             item.size_mb = out_path.stat().st_size / (1024 * 1024)
             item.note = "; ".join(notes)
-            if spec.audio is None and not probe(str(orig)).has_audio:
+            if spec.keep_original and not probe(str(orig)).has_audio:
                 item.note = (item.note + "; " if item.note else "") + "video gốc không có audio"
             return item
         finally:

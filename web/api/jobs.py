@@ -34,17 +34,23 @@ def _transition(raw: dict | None) -> TransitionConfig:
     return TransitionConfig(TransitionType(raw.get("type", "none")), float(raw.get("duration", 0.5)))
 
 
+def _opt_float(value: Any) -> float | None:
+    return None if value in (None, "") else float(value)
+
+
 def parse_texts(raw: list[dict[str, Any]]) -> list[TextReplacement]:
-    """Danh sách vùng text từ giao diện → TextReplacement."""
+    """Danh sách đoạn text từ giao diện → TextReplacement (mốc giây tính theo video gốc)."""
     texts = []
     for t in raw:
         r = t["region"]
+        pts = tuple((float(x), float(y)) for x, y in (r.get("points") or []))
         region = TextRegion(name=t.get("name") or "Vùng text", x=int(r["x"]), y=int(r["y"]),
-                            width=int(r["width"]), height=int(r["height"]))
+                            width=int(r["width"]), height=int(r["height"]), points=pts)
         style = TextStyle(**{k: v for k, v in (t.get("style") or {}).items() if k in _STYLE_KEYS})
         texts.append(TextReplacement(region=region, texts_by_lang={str(k): str(v) for k, v in
                                                                    (t.get("texts") or {}).items()},
-                                     style=style))
+                                     style=style, start_sec=float(t.get("start") or 0),
+                                     end_sec=_opt_float(t.get("end"))))
     return texts
 
 
@@ -59,9 +65,16 @@ def parse_config(body: dict[str, Any]) -> JobConfig:
             end_sec=float("inf") if end in (None, "") else float(end),
             source_dir=Path(s["source_dir"]),
         ))
+    vol = body.get("volumes") or {}
     audio = AudioConfig(
-        audio_files=[Path(p) for p in body.get("audio_files", [])],
+        music_files=[Path(p) for p in body.get("music_files", [])],
+        voice_files=[Path(p) for p in body.get("voice_files", [])],
         language_labels={str(k): str(v) for k, v in (body.get("audio_labels") or {}).items()},
+        keep_original=bool(body.get("keep_original", False)),
+        music_volume=float(vol.get("music", 100)) / 100,
+        voice_volume=float(vol.get("voice", 100)) / 100,
+        original_volume=float(vol.get("original", 100)) / 100,
+        duck_music=bool(body.get("duck_music", False)),
     )
     texts = parse_texts(body.get("texts", []))
     transitions = {str(k): _transition(v) for k, v in (body.get("transitions") or {}).items()}

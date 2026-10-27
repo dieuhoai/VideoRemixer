@@ -122,51 +122,113 @@ class TextReplaceResult:
 
 @dataclass
 class _Region:
+    name: str
     x0: int
     y0: int
-    x1: int
-    y1: int
-    overlay: np.ndarray  # RGBA, kích thước (y1-y0, x1-x0)
-    mask: np.ndarray  # 255 = phần text cũ cần xoá; viền đệm (0) là nguồn để nội suy
-    clean: np.ndarray | None = None  # nền đã inpaint, làm mới mỗi ~1/3 giây
+    overlay: np.ndarray  # RGBA, đúng kích thước khung chứa tứ giác đã cắt theo khung hình
+    poly: np.ndarray  # 255 = bên trong vùng text cũ (tứ giác)
+    start: float
+    end: float
+    clean: tuple[np.ndarray, np.ndarray] | None = None  # (nền đã xoá chữ cũ, alpha trộn), làm mới định kỳ
+
+    @property
+    def x1(self) -> int:
+        return self.x0 + self.poly.shape[1]
+
+    @property
+    def y1(self) -> int:
+        return self.y0 + self.poly.shape[0]
+
+
+def _quad_overlay(text: str, corners: tuple[tuple[float, float], ...], style: TextStyle, w: int, h: int
+                  ) -> tuple[np.ndarray, np.ndarray, int, int, str] | None:
+    """Vẽ text vào tứ giác: render phẳng rồi biến dạng theo phối cảnh. None nếu tứ giác nằm ngoài khung hình."""
+    pts = np.array(corners, dtype=np.float32)
+    top = float(np.linalg.norm(pts[1] - pts[0]))
+    bottom = float(np.linalg.norm(pts[2] - pts[3]))
+    left = float(np.linalg.norm(pts[3] - pts[0]))
+    right = float(np.linalg.norm(pts[2] - pts[1]))
+    tw = max(4, int(round(max(top, bottom))))
+    th = max(4, int(round(max(left, right))))
+    flat, note = render_overlay(text, tw, th, style)
+    x0 = int(np.floor(pts[:, 0].min()))
+    y0 = int(np.floor(pts[:, 1].min()))
+    bw = int(np.ceil(pts[:, 0].max())) - x0 + 1
+    bh = int(np.ceil(pts[:, 1].max())) - y0 + 1
+    dst = pts - np.array([x0, y0], dtype=np.float32)
+    src = np.float32([[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]])
+    m = cv2.getPerspectiveTransform(src, dst)
+    overlay = cv2.warpPerspective(flat, m, (bw, bh), flags=cv2.INTER_LINEAR,
+                                  borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+    poly = np.zeros((bh, bw), dtype=np.uint8)
+    cv2.fillPoly(poly, [np.round(dst).astype(np.int32)], 255)
+    # Cắt phần nằm ngoài khung hình
+    sx, sy = max(0, -x0), max(0, -y0)
+    ex, ey = min(bw, w - x0), min(bh, h - y0)
+    if ex <= sx or ey <= sy:
+        return None
+    return overlay[sy:ey, sx:ex], poly[sy:ey, sx:ex], x0 + sx, y0 + sy, note
 
 
 def _prepare(replacements: list[TextReplacement], language: str, w: int, h: int) -> tuple[list[_Region], list[str]]:
     regions: list[_Region] = []
     notes: list[str] = []
-    margin = 6
     for r in replacements:
-        reg = r.region
-        x0, y0 = max(0, reg.x - margin), max(0, reg.y - margin)
-        x1, y1 = min(w, reg.x + reg.width + margin), min(h, reg.y + reg.height + margin)
-        if x1 - x0 < 4 or y1 - y0 < 4:
-            raise ValueError(f"vùng '{reg.name}' nằm ngoài khung hình hoặc quá nhỏ")
-        inner_w, inner_h = reg.width, reg.height
-        overlay, note = render_overlay(r.texts_by_lang[language], inner_w, inner_h, r.style)
-        full = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
-        ox, oy = reg.x - x0, reg.y - y0
-        full[oy:oy + inner_h, ox:ox + inner_w] = overlay
-        mask = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
-        mask[max(oy, 0):max(oy, 0) + inner_h, max(ox, 0):max(ox, 0) + inner_w] = 255
-        regions.append(_Region(x0, y0, x1, y1, full, mask))
+        text = (r.texts_by_lang.get(language) or "").strip()
+        if not text:
+            continue
+        built = _quad_overlay(text, r.region.corners(), r.style, w, h)
+        if built is None:
+            raise ValueError(f"vùng '{r.region.name}' nằm ngoài khung hình")
+        overlay, poly, x0, y0, note = built
         if note:
-            notes.append(f"{reg.name}: {note}")
+            notes.append(f"{r.region.name}: {note}")
+        end = float("inf") if r.end_sec is None else float(r.end_sec)
+        regions.append(_Region(r.region.name, x0, y0, overlay, poly, float(r.start_sec), end))
     return regions, notes
 
 
-def _apply_regions(frame: np.ndarray, regions: list[_Region], refresh_now: bool) -> None:
-    """Xoá text cũ rồi vẽ text mới lên `frame` (BGR, sửa tại chỗ)."""
+def _clean_background(roi: np.ndarray, poly: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Xoá chữ cũ theo nét chữ thay vì cả hộp: lấy màu nền quanh vùng, chỉ inpaint pixel khác màu nền."""
+    inside = poly > 0
+    ring = (cv2.dilate(poly, np.ones((9, 9), np.uint8)) > 0) & ~inside
+    sample = roi[ring] if ring.any() else roi[inside]
+    bg = np.median(sample, axis=0) if len(sample) else np.median(roi.reshape(-1, 3), axis=0)
+    diff = np.abs(roi.astype(np.int16) - bg.astype(np.int16)).max(axis=2)
+    ink = (diff > 12) & inside
+    if ink.sum() < 0.02 * inside.sum():  # nền gần giống màu chữ: không tách được nét, xoá cả vùng
+        ink = inside
+    mask = cv2.dilate(ink.astype(np.uint8) * 255, np.ones((7, 7), np.uint8))
+    mask = np.where(inside, mask, 0).astype(np.uint8)
+    ring_ink = np.abs(sample.astype(np.int16) - bg.astype(np.int16)).max(axis=1) if len(sample) else np.zeros(1)
+    if ring.any() and float((ring_ink > 12).mean()) < 0.15:  # gần như toàn màu nền (chữ cũ không lấn ra viền)
+        # Nền phẳng (một màu): tô cả vùng bằng đúng màu nền, không inpaint nên không còn vệt
+        mask = inside.astype(np.uint8) * 255
+        clean = np.broadcast_to(bg.astype(np.uint8), roi.shape).copy()
+    else:
+        clean = cv2.inpaint(roi, mask, 5, cv2.INPAINT_TELEA)
+        soft = cv2.GaussianBlur(clean, (0, 0), 2.5)  # nền có chi tiết: làm mềm vùng vừa xoá
+        clean = np.where(mask[..., None] > 0, soft, clean).astype(np.uint8)
+    alpha = cv2.GaussianBlur(mask.astype(np.float32) / 255.0, (7, 7), 0)  # mép mờ, không có viền cứng
+    return clean, alpha
+
+
+def _apply_regions(frame: np.ndarray, regions: list[_Region], t: float, refresh_now: bool) -> None:
+    """Xoá text cũ rồi vẽ text mới lên `frame` (BGR, sửa tại chỗ) cho các vùng đang hiện tại t giây."""
     for reg in regions:
+        if not (reg.start <= t < reg.end):
+            reg.clean = None  # lần sau hiện lại sẽ xoá nền từ khung mới
+            continue
+        roi = frame[reg.y0:reg.y1, reg.x0:reg.x1]
         if reg.clean is None or refresh_now:
-            reg.clean = cv2.inpaint(frame[reg.y0:reg.y1, reg.x0:reg.x1].copy(), reg.mask, 3, cv2.INPAINT_TELEA)
-        bg = frame[reg.y0:reg.y1, reg.x0:reg.x1]
-        m = reg.mask == 255
-        bg[m] = reg.clean[m]
+            reg.clean = _clean_background(roi.copy(), reg.poly)
+        clean, alpha = reg.clean
+        a = alpha[..., None]
+        base = roi.astype(np.float32) * (1 - a) + clean.astype(np.float32) * a
         ov = reg.overlay
-        alpha = ov[..., 3:4].astype(np.float32) / 255.0
+        oa = ov[..., 3:4].astype(np.float32) / 255.0
         rgb_bgr = ov[..., [2, 1, 0]].astype(np.float32)
-        sub = frame[reg.y0:reg.y1, reg.x0:reg.x1].astype(np.float32)
-        frame[reg.y0:reg.y1, reg.x0:reg.x1] = (sub * (1 - alpha) + rgb_bgr * alpha).astype(np.uint8)
+        roi[...] = (base * (1 - oa) + rgb_bgr * oa).astype(np.uint8)
 
 
 def decode_frame(video: Path, t: float, w: int, h: int) -> np.ndarray:
@@ -181,15 +243,13 @@ def decode_frame(video: Path, t: float, w: int, h: int) -> np.ndarray:
     return np.frombuffer(r.stdout[: w * h * 3], dtype=np.uint8).reshape(h, w, 3).copy()
 
 
-def render_text_on_frame(frame: np.ndarray, replacements: list[TextReplacement], language: str) -> np.ndarray:
-    """Áp text thay thế của `language` lên một khung hình BGR (dùng cho xem trước). Trả về ảnh mới."""
+def render_text_on_frame(frame: np.ndarray, replacements: list[TextReplacement], language: str,
+                         t: float = 0.0) -> np.ndarray:
+    """Áp text thay thế của `language` lên một khung hình BGR tại giây t (dùng cho xem trước). Trả về ảnh mới."""
     out = frame.copy()
-    active = [r for r in replacements if (r.texts_by_lang.get(language) or "").strip()]
-    if not active:
-        return out
     h, w = out.shape[:2]
-    regions, _ = _prepare(active, language, w, h)
-    _apply_regions(out, regions, refresh_now=True)
+    regions, _ = _prepare(replacements, language, w, h)
+    _apply_regions(out, regions, t, refresh_now=True)
     return out
 
 
@@ -199,8 +259,9 @@ def replace_text_on_video(
     language: str,
     output: Path,
     cancel: CancelCheck | None = None,
+    time_offset: float = 0.0,  # giây của khung hình đầu tiên trong `video`, để khớp mốc thời gian của đoạn text
 ) -> TextReplaceResult:
-    """Xoá text cũ bằng inpaint rồi vẽ text mới cho `language` lên toàn bộ video (chỉ hình)."""
+    """Thay text cho `language` lên đúng các khoảng thời gian đã chọn (chỉ hình, giữ nguyên âm thanh)."""
     active = [r for r in replacements if (r.texts_by_lang.get(language) or "").strip()]
     if not active:
         return TextReplaceResult(output=None)
@@ -210,7 +271,7 @@ def replace_text_on_video(
     regions, notes = _prepare(active, language, w, h)
     frame_bytes = w * h * 3
     fps = f"{info.fps:.3f}"
-    refresh = max(1, int(info.fps // 3))  # inpaint lại ~3 lần/giây: đủ cho nền tĩnh và nền chuyển chậm
+    refresh = max(1, int(info.fps // 3))  # xoá nền lại ~3 lần/giây: đủ cho nền tĩnh và nền chuyển chậm
 
     with tempfile.TemporaryFile() as dec_err, tempfile.TemporaryFile() as enc_err:
         dec = subprocess.Popen(
@@ -240,7 +301,7 @@ def replace_text_on_video(
                 if cancel and index % 10 == 0 and cancel():
                     raise Cancelled()
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3).copy()
-                _apply_regions(frame, regions, index % refresh == 0)
+                _apply_regions(frame, regions, time_offset + index / info.fps, index % refresh == 0)
                 enc.stdin.write(frame.tobytes())
                 index += 1
             enc.stdin.close()
@@ -268,4 +329,4 @@ def replace_text_on_video(
             raise FFmpegError("không đọc được frame để thay text")
     if os.path.getsize(output) == 0:
         raise FFmpegError("ghi video thay text thất bại")
-    return TextReplaceResult(output=output, note="; ".join(notes))
+    return TextReplaceResult(output=output, note="; ".join(dict.fromkeys(notes)))

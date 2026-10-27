@@ -38,7 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--intro", metavar="END:DIR", help="Thay đoạn đầu từ 0 đến END giây")
     run.add_argument("--custom", metavar="START:END:DIR", help="Thay đoạn giữa từ START đến END giây")
     run.add_argument("--outro", metavar="START:DIR", help="Thay đoạn cuối từ START giây đến hết")
-    run.add_argument("--audio", action="append", default=[], type=Path, help="File audio thay thế (lặp lại được)")
+    run.add_argument("--audio", action="append", default=[], type=Path, help="Nhạc nền (lặp lại được)")
+    run.add_argument("--voice", action="append", default=[], type=Path,
+                     help="File voice thay thế, ngôn ngữ lấy từ tên file, ví dụ Voice01_EN.mp3 (lặp lại được)")
     run.add_argument("--transition", default="none", choices=[t.value for t in TransitionType])
     run.add_argument("--transition-duration", type=float, default=0.5)
     run.add_argument("--short", choices=["trim", "skip"], default="trim",
@@ -66,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         input_dir=args.input_dir,
         output_dir=args.output_dir,
         segments=segments,
-        audio=AudioConfig(audio_files=list(args.audio)),
+        audio=AudioConfig(music_files=list(args.audio), voice_files=list(args.voice)),
         default_transition=TransitionConfig(TransitionType(args.transition), args.transition_duration),
         naming=NamingConfig(appname=args.appname, concept=args.concept, geo=args.geo, date_str=args.date),
     )

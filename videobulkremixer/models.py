@@ -16,12 +16,19 @@ class SegmentType(str, Enum):
 class TransitionType(str, Enum):
     NONE = "none"
     CROSSFADE = "crossfade"
+    DISSOLVE = "dissolve"
     FADE_BLACK = "fade_black"
     FADE_WHITE = "fade_white"
-    SLIDE_LR = "slide_lr"
-    SLIDE_RL = "slide_rl"
-    WIPE_TB = "wipe_tb"
-    WIPE_BT = "wipe_bt"
+    SLIDE_LR = "slide_lr"  # cảnh mới trượt từ trái sang phải
+    SLIDE_RL = "slide_rl"  # cảnh mới trượt từ phải sang trái
+    SLIDE_UP = "slide_up"  # cảnh mới trượt từ dưới lên
+    SLIDE_DOWN = "slide_down"  # cảnh mới trượt từ trên xuống
+    WIPE_LR = "wipe_lr"  # quét từ trái sang phải
+    WIPE_RL = "wipe_rl"  # quét từ phải sang trái
+    WIPE_TB = "wipe_tb"  # quét từ trên xuống
+    WIPE_BT = "wipe_bt"  # quét từ dưới lên
+    CIRCLE_OPEN = "circle_open"  # cảnh mới nở tròn từ giữa
+    ZOOM_IN = "zoom_in"  # cảnh cũ phóng to rồi chuyển sang cảnh mới
 
 
 @dataclass
@@ -50,28 +57,49 @@ class TransitionConfig:
     def __post_init__(self) -> None:
         if self.duration_sec < 0:
             raise ValueError("duration_sec phải >= 0")
+        if self.transition_type != TransitionType.NONE and not 0.2 <= self.duration_sec <= 1.5:
+            raise ValueError("thời lượng hiệu ứng phải từ 0,2 đến 1,5 giây")
 
 
 @dataclass
 class AudioConfig:
-    """Cấu hình audio thay thế."""
-    audio_files: list[Path] = field(default_factory=list)
-    language_labels: dict[str, str] = field(default_factory=dict)
-    # key = tên file audio, value = mã ngôn ngữ (vi, en, ja...)
+    """Audio của video thành phẩm: nhạc nền, voice thay thế và tiếng gốc, mỗi nguồn một âm lượng riêng."""
+    music_files: list[Path] = field(default_factory=list)  # nhạc nền, không cần ngôn ngữ
+    voice_files: list[Path] = field(default_factory=list)  # voice thay thế, bắt buộc có ngôn ngữ
+    language_labels: dict[str, str] = field(default_factory=dict)  # tên file voice -> mã ngôn ngữ
+    keep_original: bool = False  # giữ tiếng và nhạc của video gốc
+    music_volume: float = 1.0  # 0 – 2 (1 = 100%)
+    voice_volume: float = 1.0
+    original_volume: float = 1.0
+    duck_music: bool = False  # tự giảm nhạc nền khi có voice
 
     @property
     def has_replacement(self) -> bool:
-        return len(self.audio_files) > 0
+        return bool(self.music_files or self.voice_files)
+
+    def voice_language(self, path: Path) -> str:
+        """Mã ngôn ngữ của file voice: ưu tiên nhãn người dùng chọn, sau đó đoán từ tên file."""
+        from videobulkremixer.audio_mixer import guess_language_from_filename
+        return (self.language_labels.get(path.name) or guess_language_from_filename(path.name) or "").lower()
 
 
 @dataclass
 class TextRegion:
-    """Một vùng text trên video."""
+    """Một vùng text trên video. Nếu có `points` (4 góc theo chiều kim đồng hồ) thì vùng là tứ giác (có thể nghiêng)."""
     name: str  # "Tiêu đề", "CTA"...
     x: int
     y: int
     width: int
     height: int
+    points: tuple[tuple[float, float], ...] = ()
+
+    def corners(self) -> tuple[tuple[float, float], ...]:
+        if self.points:
+            if len(self.points) != 4:
+                raise ValueError(f"vùng '{self.name}' cần đúng 4 góc")
+            return tuple((float(x), float(y)) for x, y in self.points)
+        x, y, w, h = self.x, self.y, self.width, self.height
+        return ((x, y), (x + w, y), (x + w, y + h), (x, y + h))
 
 
 @dataclass
@@ -90,11 +118,22 @@ class TextStyle:
 
 @dataclass
 class TextReplacement:
-    """Thay text trên video cho 1 ngôn ngữ."""
+    """Một đoạn thay text: vùng + khoảng thời gian + text mới theo ngôn ngữ.
+
+    Thời gian tính theo video gốc. end_sec = None nghĩa là đến hết video.
+    """
     region: TextRegion
     texts_by_lang: dict[str, str] = field(default_factory=dict)
     # key = mã ngôn ngữ, value = text mới
     style: TextStyle = field(default_factory=TextStyle)
+    start_sec: float = 0.0
+    end_sec: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.start_sec < 0:
+            raise ValueError("thời điểm bắt đầu của đoạn text phải >= 0")
+        if self.end_sec is not None and self.end_sec <= self.start_sec:
+            raise ValueError(f"đoạn text '{self.region.name}': giây kết thúc phải lớn hơn giây bắt đầu")
 
 
 @dataclass
@@ -166,7 +205,7 @@ class JobConfig:
         if source_counts:
             for count in source_counts.values():
                 seg_multiplier *= max(count, 1)
-        audio_count = max(len(self.audio.audio_files), 1)
+        audio_count = max(len(self.audio.music_files), 1) * max(len(self.audio.voice_files), 1)
         lang_count = 1
         if self.text_replacements:
             all_langs: set[str] = set()

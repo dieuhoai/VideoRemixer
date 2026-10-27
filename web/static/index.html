@@ -199,7 +199,7 @@
 
       <!-- Audio -->
       <div x-show="tab === 'audio'" role="tabpanel">
-        <p class="hint">Không chọn file nào = giữ nguyên audio gốc. Audio chạy liền mạch xuyên suốt video.</p>
+        <p class="hint">Chọn "Nhạc nền" hoặc "Voice" cho từng file. Voice có ngôn ngữ (lấy từ tên file, có thể đổi). Có thể dùng nhạc + voice cùng lúc.</p>
         <div class="row">
           <input class="input flex-1" aria-label="Thư mục audio" x-model.trim="form.audio_dir"
                  placeholder="Thư mục chứa file audio (tuỳ chọn)">
@@ -210,14 +210,33 @@
             <div class="file-item">
               <span class="file-icon" aria-hidden="true">🔈</span>
               <span class="file-name" x-text="a.name"></span>
-              <select class="select select-sm" :aria-label="'Ngôn ngữ của ' + a.name" x-model="a.lang">
-                <option value="">Chọn ngôn ngữ…</option>
-                <template x-for="l in languageOptions" :key="l"><option :value="l" x-text="l.toUpperCase()"></option></template>
-              </select>
+              <div class="row-sm">
+                <button type="button" class="chip" :aria-pressed="a.kind === 'music'" :class="{ on: a.kind === 'music' }"
+                        @click="a.kind = 'music'">Nhạc nền</button>
+                <button type="button" class="chip" :aria-pressed="a.kind === 'voice'" :class="{ on: a.kind === 'voice' }"
+                        @click="a.kind = 'voice'">Voice</button>
+                <button type="button" class="chip" :aria-pressed="a.kind === 'none'" :class="{ on: a.kind === 'none' }"
+                        @click="a.kind = 'none'">Không dùng</button>
+                <select class="select select-sm" x-show="a.kind === 'voice'" :aria-label="'Ngôn ngữ của ' + a.name" x-model="a.lang">
+                  <option value="">Chưa nhận ra</option>
+                  <template x-for="l in languageOptions" :key="l"><option :value="l" x-text="l.toUpperCase()"></option></template>
+                </select>
+              </div>
             </div>
           </template>
         </div>
-        <p class="warn" x-show="audioFiles.some(a => !a.lang)">Có file chưa chọn ngôn ngữ — hãy chọn để tên file đúng.</p>
+        <p class="warn" x-show="voiceFiles.some(a => !a.lang)">Có voice chưa nhận ra ngôn ngữ — hãy chọn ngôn ngữ trước khi chạy.</p>
+
+        <div class="audio-mix">
+          <label class="field-inline"><input type="checkbox" x-model="keepOriginal"> Giữ audio gốc của video</label>
+          <label class="field-inline"><input type="checkbox" x-model="duckMusic"> Hạ nhạc nền khi có voice</label>
+          <label class="field">Âm lượng nhạc nền: <span x-text="volumes.music + '%'"></span>
+            <input type="range" min="0" max="200" step="5" aria-label="Âm lượng nhạc nền" x-model.number="volumes.music"></label>
+          <label class="field">Âm lượng voice: <span x-text="volumes.voice + '%'"></span>
+            <input type="range" min="0" max="200" step="5" aria-label="Âm lượng voice" x-model.number="volumes.voice"></label>
+          <label class="field">Âm lượng audio gốc: <span x-text="volumes.original + '%'"></span>
+            <input type="range" min="0" max="200" step="5" aria-label="Âm lượng audio gốc" x-model.number="volumes.original"></label>
+        </div>
       </div>
 
       <!-- Text -->
@@ -239,6 +258,9 @@
           <template x-for="(r, ri) in textRegions" :key="ri">
             <div class="box saved" :style="regionStyle(r)"><span x-text="r.name || ('Vùng ' + (ri + 1))"></span></div>
           </template>
+          <template x-for="ci in [0, 1, 2, 3]" :key="'corner' + ci">
+            <div class="corner" :style="cornerStyle(ci)" @pointerdown.stop="startCorner(ci, $event)" aria-label="Kéo góc vùng text"></div>
+          </template>
         </div>
         <p class="hint" x-show="frameUrl">Kéo chuột trên hình để vẽ vùng text cũ.</p>
 
@@ -250,6 +272,15 @@
                 <button class="btn btn-sm btn-ghost" type="button" @click="textRegions.splice(ri, 1); renderFrame()" aria-label="Xoá vùng">✕</button>
               </div>
               <p class="file-meta" x-text="'Vị trí: x ' + r.x + ', y ' + r.y + ' · ' + r.width + '×' + r.height + ' px'"></p>
+              <div class="row-sm">
+                <label class="field">Từ giây
+                  <input type="number" min="0" step="0.5" class="input input-sm" x-model.number="r.start" @change="renderFrame()"></label>
+                <label class="field">Đến giây (trống = hết video)
+                  <input type="number" min="0" step="0.5" class="input input-sm" x-model="r.end" placeholder="hết video"></label>
+                <button class="btn btn-sm" type="button" :aria-pressed="tiltFor === ri" @click="toggleTilt(ri)"
+                        x-text="tiltFor === ri ? 'Xong nghiêng' : 'Nghiêng 4 góc'"></button>
+                <button class="btn btn-sm btn-ghost" type="button" x-show="r.points" @click="clearTilt(ri)">Bỏ nghiêng</button>
+              </div>
               <template x-for="lang in textLangs" :key="lang">
                 <label class="row-sm lang-row"><span class="lang-tag" x-text="lang.toUpperCase()"></span>
                   <input class="input input-sm flex-1" x-model="r.texts[lang]" @input.debounce.500ms="renderFrame()" :placeholder="'Text ' + lang.toUpperCase()">
