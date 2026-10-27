@@ -107,3 +107,23 @@ def test_parse_config_reads_points_times_and_volumes() -> None:
     tr = cfg.text_replacements[0]
     assert tr.start_sec == 1 and tr.end_sec is None
     assert tr.region.points == ((1.0, 2.0), (4.0, 2.0), (4.0, 6.0), (1.0, 6.0))
+
+
+def test_ui_transition_keys_reach_the_right_joint() -> None:
+    body = {"input_dir": "in", "output_dir": "out", "segments": [],
+            "transitions": {"0": {"type": "slide_lr", "duration": 0.8}, "j2": {"type": "fade_black", "duration": 0.5}}}
+    cfg = parse_config(body)
+    assert cfg.transition_for_joint(0).transition_type == TransitionType.SLIDE_LR
+    assert cfg.transition_for_joint(0).duration_sec == pytest.approx(0.8)
+    assert cfg.transition_for_joint(2).transition_type == TransitionType.FADE_BLACK
+    assert cfg.transition_for_joint(1).transition_type == TransitionType.NONE
+
+
+def test_name_language_falls_back_to_original_video_name() -> None:
+    from videobulkremixer.orchestrator import OutputSpec, _name_lang
+
+    plain = OutputSpec(lang="", music=None, voice=None, keep_original=True)
+    assert _name_lang(plain, "Clip_01_VI.mp4") == "vi"
+    assert _name_lang(plain, "Clip_01.mp4") == "orig"
+    voiced = OutputSpec(lang="en", music=None, voice=None, keep_original=False)
+    assert _name_lang(voiced, "Clip_01_VI.mp4") == "en"

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from videobulkremixer.audio_mixer import MixPlan, mix_audio
+from videobulkremixer.audio_mixer import MixPlan, guess_language_from_filename, mix_audio
 from videobulkremixer.ff import Cancelled, DiskFull, FFmpegError, probe
 from videobulkremixer.models import (
     ItemResult,
@@ -55,6 +55,11 @@ class OutputSpec:
     @property
     def folder_lang(self) -> str:
         return self.lang or self.music_lang or "orig"
+
+
+def _name_lang(spec: OutputSpec, orig_name: str) -> str:
+    """Ngôn ngữ dùng để đặt tên: voice/text → nhạc nền có ngôn ngữ → ngôn ngữ trong tên video gốc → orig."""
+    return spec.lang or spec.music_lang or guess_language_from_filename(orig_name) or "orig"
 
 
 def build_output_plan(config: JobConfig) -> list[OutputSpec]:
@@ -271,7 +276,7 @@ class Pipeline:
                             break
                         except Exception as e:  # noqa: BLE001
                             item = ItemResult(source_video=orig.name, ok=False, error=_friendly(e),
-                                              language=spec.folder_lang)
+                                              language=_name_lang(spec, orig.name))
                         result.items.append(item)
                     if stop:
                         break
@@ -300,7 +305,8 @@ class Pipeline:
         audio_names = [f.name for f in (spec.music, spec.voice) if f is not None]
         if spec.keep_original:
             audio_names.append("gốc")
-        item = ItemResult(source_video=orig.name, duration_in=info.duration, language=spec.folder_lang,
+        lang = _name_lang(spec, orig.name)
+        item = ItemResult(source_video=orig.name, duration_in=info.duration, language=lang,
                           audio_file=" + ".join(audio_names) or "không có")
         notes: list[str] = []
         try:
@@ -366,7 +372,7 @@ class Pipeline:
                 notes.append(amsg)
 
             # 5. Đặt tên theo naming convention, không ghi đè file đã có
-            out_path = self._place_output(final, spec, info.ratio)
+            out_path = self._place_output(final, spec, info.ratio, lang)
             item.output_path = out_path
             item.ok = True
             item.duration_out = probe(str(out_path)).duration
@@ -394,14 +400,14 @@ class Pipeline:
     def cancelled_check(self) -> bool:
         return self.cancelled
 
-    def _place_output(self, src: Path, spec: OutputSpec, ratio: str) -> Path:
+    def _place_output(self, src: Path, spec: OutputSpec, ratio: str, lang: str) -> Path:
         cfg = self.config
-        folder_name = f"{cfg.naming.geo}_{spec.folder_lang}" if cfg.naming.geo else spec.folder_lang
+        folder_name = f"{cfg.naming.geo}_{lang}" if cfg.naming.geo else lang
         folder = cfg.output_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         stt = self._stt.get(folder_name, 0) + 1
         while True:
-            name = generate_name(cfg.naming, spec.folder_lang, ratio, stt)
+            name = generate_name(cfg.naming, lang, ratio, stt)
             target = folder / name
             if not target.exists():
                 break

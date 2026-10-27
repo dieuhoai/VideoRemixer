@@ -77,7 +77,8 @@ def parse_config(body: dict[str, Any]) -> JobConfig:
         duck_music=bool(body.get("duck_music", False)),
     )
     texts = parse_texts(body.get("texts", []))
-    transitions = {str(k): _transition(v) for k, v in (body.get("transitions") or {}).items()}
+    # Giao diện gửi khoá "0", "1"...; backend tra cứu theo "j0", "j1"... → đổi về cùng một dạng
+    transitions = {"j" + str(k).lstrip("j"): _transition(v) for k, v in (body.get("transitions") or {}).items()}
     n = body.get("naming") or {}
     return JobConfig(
         input_dir=Path(body["input_dir"]),

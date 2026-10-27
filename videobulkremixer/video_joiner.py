@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from videobulkremixer.ff import CancelCheck, run_ffmpeg
+from videobulkremixer.ff import CancelCheck, probe, run_ffmpeg
 from videobulkremixer.models import TransitionConfig, TransitionType
 from videobulkremixer.transition import XFADE_MAP
 from videobulkremixer.video_cutter import get_duration
@@ -25,8 +25,9 @@ def join_with_transitions(
         raise ValueError("không có đoạn nào để ghép")
     cfgs = [transitions[i] if i < len(transitions) else TransitionConfig(TransitionType.NONE)
             for i in range(len(parts) - 1)]
+    keep_audio = all(probe(str(p)).has_audio for p in parts)  # giữ tiếng gốc khi mọi đoạn đều có tiếng
     if all(c.transition_type == TransitionType.NONE for c in cfgs):
-        return _concat_copy(parts, output, cancel)
+        return _concat_copy(parts, output, cancel, keep_audio)
 
     durs = [get_duration(p) for p in parts]
     inputs: list[str] = []
@@ -34,35 +35,49 @@ def join_with_transitions(
         inputs += ["-i", str(p)]
     graph: list[str] = []
     cur = "0:v"
+    acur = "0:a"
     total = durs[0]
     for i in range(1, len(parts)):
         nxt = f"{i}:v"
+        anxt = f"{i}:a"
         label = f"v{i}"
+        alabel = f"a{i}"
         cfg = cfgs[i - 1]
         if cfg.transition_type == TransitionType.NONE:
             graph.append(f"[{cur}][{nxt}]concat=n=2:v=1:a=0[{label}]")
+            if keep_audio:
+                graph.append(f"[{acur}][{anxt}]concat=n=2:v=0:a=1[{alabel}]")
             total += durs[i]
         else:
             d = max(0.05, min(cfg.duration_sec, total / 2, durs[i] / 2))
             offset = max(0.0, total - d)
             name = XFADE_MAP[cfg.transition_type]
             graph.append(f"[{cur}][{nxt}]xfade=transition={name}:duration={d:.3f}:offset={offset:.3f}[{label}]")
+            if keep_audio:
+                graph.append(f"[{acur}][{anxt}]acrossfade=d={d:.3f}:c1=tri:c2=tri[{alabel}]")
             total += durs[i] - d
         cur = label
+        acur = alabel
     graph.append(f"[{cur}]format=yuv420p[vout]")
+    maps = ["-map", "[vout]"]
+    audio_args: list[str] = ["-an"]
+    if keep_audio:
+        maps += ["-map", f"[{acur}]"]
+        audio_args = ["-c:a", "aac", "-b:a", "192k"]
     run_ffmpeg([
-        *inputs, "-filter_complex", ";".join(graph), "-map", "[vout]",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-an", str(output),
+        *inputs, "-filter_complex", ";".join(graph), *maps,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *audio_args, str(output),
     ], cancel=cancel)
     return output
 
 
-def _concat_copy(parts: Sequence[Path], output: Path, cancel: CancelCheck | None) -> Path:
+def _concat_copy(parts: Sequence[Path], output: Path, cancel: CancelCheck | None, keep_audio: bool) -> Path:
     """Không có hiệu ứng: nối bằng concat demuxer (không encode lại)."""
     listing = output.with_suffix(".list.txt")
     listing.write_text("".join("file '" + str(p).replace("'", "'\\''") + "'\n" for p in parts), encoding="utf-8")
+    audio = [] if keep_audio else ["-an"]
     try:
-        run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", "-an", str(output)],
+        run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", *audio, str(output)],
                    cancel=cancel)
     finally:
         listing.unlink(missing_ok=True)
