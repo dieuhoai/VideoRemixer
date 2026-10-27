@@ -20,6 +20,13 @@
   </header>
   <p class="toast" role="status" aria-live="polite" x-show="message" x-text="message" @click="message = ''"></p>
 
+  <div class="update-bar" role="status" x-show="update.has || update.done">
+    <span x-show="update.has && !update.done">Có bản mới <strong x-text="update.latest"></strong>.</span>
+    <button class="btn btn-sm" type="button" x-show="update.has && !update.done" :disabled="update.busy"
+            @click="applyUpdate()" x-text="update.busy ? 'Đang cập nhật…' : 'Cập nhật ngay'"></button>
+    <a x-show="update.notes && update.has && !update.done" :href="update.notes" target="_blank" rel="noopener">Xem thay đổi</a>
+    <span x-show="update.done" x-text="update.done"></span>
+  </div>
   <main class="grid">
 
     <!-- ① VIDEO GỐC -->

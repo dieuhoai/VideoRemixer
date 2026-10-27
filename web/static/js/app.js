@@ -87,6 +87,7 @@ function app() {
     job: { status: "idle", done: 0, total: 0, current: "", ok: 0, outputs: [], failed: [], error: "", output_dir: "" },
     outPreview: null,
     lastPreview: false,
+    update: { has: false, latest: "", busy: false, done: "", notes: "" },
     textPreviewUrl: "",
     textPreviewInfo: "",
     textPreviewBusy: false,
@@ -183,6 +184,7 @@ function app() {
 
     /* ---------- khởi tạo ---------- */
     init() {
+      this.checkUpdate();
       this.$watch("form.input_dir", (v) => { if (v) this.scanVideos(v); else this.videos = []; });
       this.$watch("form.audio_dir", (v) => { if (v) this.scanAudio(v); });
       this.$watch(() => this.segSignature(), () => this.refreshTimeline());
@@ -254,6 +256,29 @@ function app() {
     },
     mediaUrl(path) { return "/api/fs/media?path=" + encodeURIComponent(path); },
     thumbUrl(v) { return "/api/fs/frame?w=160&t=1&path=" + encodeURIComponent(v.path); },
+
+    /* ---------- cập nhật ---------- */
+    async checkUpdate() {
+      try {
+        const d = await api("GET", "/api/update/check");
+        this.update.has = !!d.has_update;
+        this.update.latest = d.latest || "";
+        this.update.notes = d.notes_url || "";
+      } catch (e) { /* không kiểm tra được thì bỏ qua, không làm phiền người dùng */ }
+    },
+    async applyUpdate() {
+      if (this.update.busy) return;
+      this.update.busy = true;
+      try {
+        const d = await api("POST", "/api/update/apply");
+        this.update.has = false;
+        this.update.done = d.message || "Đã cập nhật. Hãy mở lại app.";
+      } catch (e) {
+        this.message = e.message || "Không cập nhật được";
+      } finally {
+        this.update.busy = false;
+      }
+    },
 
     /* ---------- xem trước video gốc ---------- */
     openPreview(v) {

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from videobulkremixer import APP_NAME
 
-from .api import fs, jobs
+from .api import fs, jobs, update
 from .state import STATE
 
 STATIC = Path(__file__).parent / "static"
@@ -73,7 +73,7 @@ def create_app(token: str, allowed_hosts: Iterable[str]) -> FastAPI:
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         return HTMLResponse(html, headers={"Cache-Control": "no-store", "Content-Security-Policy": CSP})
 
-    for r in (fs.router, jobs.router):
+    for r in (fs.router, jobs.router, update.router):
         app.include_router(r)
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     return app
