@@ -15,8 +15,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from videobulkremixer.ff import _NO_WINDOW, FFmpegError, ffmpeg_bin, probe
+from videobulkremixer.models import TransitionConfig, TransitionType
 from videobulkremixer.orchestrator import VIDEO_EXTS, list_videos
 from videobulkremixer.text_replacer import decode_frame, render_text_on_frame, replace_text_on_video
+from videobulkremixer.video_joiner import join_with_transitions
 from web.api.jobs import parse_texts
 
 router = APIRouter(prefix="/api/fs")
@@ -190,6 +192,51 @@ def clip_with_text(body: dict) -> Response:
         raise HTTPException(422, str(e)) from e
     except (KeyError, ValueError, TypeError) as e:
         raise HTTPException(422, f"Vùng text chưa đúng: {e}") from e
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return Response(data, media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
+
+def _cut_clip(src: Path, start: float, dur: float, out: Path) -> None:
+    r = subprocess.run(
+        [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
+         "-i", str(src), "-vf", "scale='2*floor(min(1280,iw)/2)':-2", "-c:v", "libx264", "-preset", "veryfast",
+         "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", str(out)],
+        capture_output=True, timeout=120, creationflags=_NO_WINDOW,
+    )
+    if r.returncode != 0:
+        raise FFmpegError("không cắt được đoạn xem thử")
+
+
+@router.post("/transition-preview")
+def transition_preview(body: dict) -> Response:
+    """Đoạn 3 giây thật: 2 giây từ video đang xem + 2 giây sau, nối bằng đúng hiệu ứng đã chọn."""
+    p = _checked_file(str(body.get("path", "")), VIDEO_EXTS)
+    try:
+        kind = TransitionType(str(body.get("type", "")))
+    except ValueError as e:
+        raise HTTPException(422, "Hiệu ứng không hợp lệ") from e
+    if kind == TransitionType.NONE:
+        raise HTTPException(422, "Chưa chọn hiệu ứng để xem thử")
+    try:
+        duration = float(body.get("duration", 1.0))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(422, "Thời lượng hiệu ứng không hợp lệ") from e
+    if not 0.2 <= duration <= 1.5:
+        raise HTTPException(422, "Thời lượng hiệu ứng phải từ 0,2 đến 1,5 giây")
+    work = Path(tempfile.mkdtemp(prefix="vrm_tr_"))
+    try:
+        info = probe(str(p))
+        start = min(max(float(body.get("t", 0) or 0), 0.0), max(info.duration - 4.0, 0.0))
+        if info.duration < 4.0:
+            raise HTTPException(422, "Video quá ngắn để xem thử (cần ít nhất 4 giây)")
+        a, b, out = work / "a.mp4", work / "b.mp4", work / "preview.mp4"
+        _cut_clip(p, start, 2.0, a)
+        _cut_clip(p, start + 2.0, 2.0, b)
+        join_with_transitions([a, b], [TransitionConfig(kind, duration)], out, work)
+        data = out.read_bytes()
+    except FFmpegError as e:
+        raise HTTPException(422, str(e)) from e
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return Response(data, media_type="video/mp4", headers={"Cache-Control": "no-store"})

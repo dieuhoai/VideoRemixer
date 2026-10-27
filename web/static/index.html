@@ -161,6 +161,7 @@
         <div class="anim-row">
           <canvas class="anim" width="240" height="90" aria-label="Xem trước hiệu ứng" x-ref="anim"></canvas>
           <button type="button" class="btn btn-sm" @click="previewAnim()" :disabled="transitionFor(openedJoint).type === 'none'">▶ Xem hiệu ứng</button>
+          <button type="button" class="btn btn-sm" @click="previewTransition()" :disabled="transitionFor(openedJoint).type === 'none' || textPreviewBusy">▶ Xem thử 3 giây</button>
         </div>
       </div>
     </section>

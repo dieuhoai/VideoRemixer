@@ -368,6 +368,36 @@ function app() {
         this.textPreviewBusy = false;
       }
     },
+    async previewTransition() {
+      const src = this.preview || this.firstVideo;
+      const i = this.openedJoint;
+      if (!src || i === null) { this.message = "Hãy chọn một video để xem thử."; return; }
+      const tr = this.transitionFor(i);
+      if (tr.type === "none") { this.message = "Hãy chọn một hiệu ứng trước."; return; }
+      this.textPreviewBusy = true;
+      this.textPreviewInfo = "Đang dựng đoạn xem thử hiệu ứng (khoảng 3 giây)…";
+      try {
+        const r = await fetch("/api/fs/transition-preview", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: src.path, t: Math.max(0, Number(this.frameAt) || 0), type: tr.type, duration: tr.duration }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || "Không dựng được đoạn xem thử");
+        }
+        const blob = await r.blob();
+        this.clearTextPreview();
+        this.textPreviewUrl = URL.createObjectURL(blob);
+        const p = document.getElementById("player");
+        p.src = this.textPreviewUrl;
+        p.load();
+        this.textPreviewInfo = "Đang xem hiệu ứng " + this.effectLabel(tr.type) + " (" + tr.duration.toFixed(1) + " giây)";
+      } catch (e) {
+        this.textPreviewInfo = e.message;
+      } finally {
+        this.textPreviewBusy = false;
+      }
+    },
     setFocusedFromNow() {
       if (!this.focused) { this.message = "Hãy bấm vào một ô giây ở ô 2 trước."; return; }
       const [k, f] = this.focused.split(".");

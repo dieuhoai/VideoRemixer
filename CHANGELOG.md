@@ -15,3 +15,4 @@
 - Nhạc nền có thể chọn ngôn ngữ (không bắt buộc), ngôn ngữ này chỉ dùng để ghép vào tên file.
 - Thanh âm lượng 0–200% cho nhạc nền, voice và audio gốc.
 - Nhận thêm các định dạng audio opus, wma, aif và aiff.
+- Nút “Xem thử 3 giây” trong mục hiệu ứng: dựng đoạn 3 giây thật từ video đang xem, nối bằng đúng hiệu ứng đã chọn, có tiếng.
